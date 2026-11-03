@@ -50,7 +50,11 @@ const Coach = (() => {
     }
 
     if (s.avg.p < g.p * 0.9) {
-      const ideas = Foods.topProtein(3).join(', ');
+      // Zuerst eigene Lebensmittel des Nutzers, dann allgemeine Beispiele bis drei Vorschläge da sind
+      const own = s.proteinIdeas || [];
+      const generic = ['Magerquark', 'Skyr', 'Hähnchenbrust', 'Thunfisch']
+        .filter((g) => !own.some((o) => o.toLowerCase().includes(g.toLowerCase())));
+      const ideas = [...own, ...generic].slice(0, 3).join(', ');
       out.push({ level: 'warn', text: `Eiweiß Ø ${r1(s.avg.p)} g, Ziel ${g.p} g. Gute Quellen mit wenig Fett: ${ideas}.` });
     }
 

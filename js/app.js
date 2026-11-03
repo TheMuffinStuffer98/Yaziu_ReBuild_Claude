@@ -36,7 +36,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = 'gemini-2.5-flash';
-  const APP_VERSION = 'v7'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v8'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -167,6 +167,15 @@
     return out;
   }
 
+  // Eiweißreiche, fettarme Lebensmittel aus der eigenen Liste des Nutzers (für Coach-Hinweise)
+  function proteinIdeas(count) {
+    return allFoods()
+      .filter((f) => f.kcal > 0 && f.p >= 10 && f.f <= 5)
+      .sort((a, b) => b.p / b.kcal - a.p / a.kcal)
+      .slice(0, count)
+      .map((f) => f.name);
+  }
+
   function weightAvg(from, to) {
     const w = data.weights().filter((e) => e.date >= from && e.date <= to);
     return w.length ? w.reduce((t, e) => t + e.kg, 0) / w.length : null;
@@ -201,6 +210,7 @@
       },
       weightRate: recent !== null && prev !== null ? recent - prev : null,
       weightKg: currentWeight(),
+      proteinIdeas: proteinIdeas(3),
       sessions: data.workouts().filter((w) => w.date >= dates[0] && w.date <= end).length,
       goals: goals(),
       goal: settings().goal,
@@ -429,7 +439,9 @@
   function listHtml(kind, ls, scope) {
     const items = listItems(kind, ls);
     if (!items.length) {
-      let msg = 'Noch nichts vorhanden.';
+      let msg = kind === 'food'
+        ? 'Noch keine Lebensmittel. Scanne ein Produkt oder lege es von Hand an.'
+        : 'Noch keine Gerichte. Lege eines an oder speichere eine Mahlzeit aus dem Tagebuch.';
       if (ls.q) msg = 'Nichts gefunden.';
       else if (ls.filter === 'fav') msg = 'Noch keine Favoriten. Tippe auf ☆.';
       else if (ls.filter === 'recent') msg = 'Noch nichts benutzt.';

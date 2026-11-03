@@ -12,14 +12,26 @@ const Parse = (() => {
   }
 
   // Findet das beste Lebensmittel zu einem Begriff (Plural und Teilwörter erlaubt)
+  // Rangfolge: genauer Name, Name als Wortanfang, Eingabe als Namensanfang, erstes Wort (Kartoffeln → Kartoffel roh).
+  // Bei Gleichstand gewinnt der frühere Eintrag der Liste.
   function find(term, foods) {
     const t = term.toLowerCase();
-    const hits = foods.filter((f) => {
+    let best = null;
+    let bestScore = 0;
+    foods.forEach((f) => {
       const n = f.name.toLowerCase();
-      return n === t || (t.startsWith(n) && n.length >= 2) || (n.startsWith(t) && t.length >= 4);
+      const first = n.split(/[\s(]/)[0];
+      let score = 0;
+      if (n === t) score = 1000;
+      else if (t.startsWith(n) && n.length >= 2) score = 500 + n.length;
+      else if (n.startsWith(t) && t.length >= 4) score = 400 + t.length;
+      else if (first.length >= 3 && t.startsWith(first)) score = 100 + first.length;
+      if (score > bestScore) {
+        best = f;
+        bestScore = score;
+      }
     });
-    hits.sort((a, b) => b.name.length - a.name.length);
-    return hits[0] || null;
+    return best;
   }
 
   // "80 g Haferflocken" -> {food, grams: 80}; "2 Eier" -> {food, grams: 120}
