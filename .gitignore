@@ -1,0 +1,9 @@
+# Betriebssystem und Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Lokale Notizen und Exporte mit echten Daten nicht hochladen
+*.local.json
+fitness-*.json

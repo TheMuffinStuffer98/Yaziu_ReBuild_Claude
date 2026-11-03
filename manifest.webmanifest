@@ -1,0 +1,10 @@
+{
+  "name": "Fitness-Tagebuch",
+  "short_name": "Tagebuch",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f6f5",
+  "theme_color": "#1f7a5a",
+  "lang": "de"
+}
