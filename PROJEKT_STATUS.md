@@ -107,6 +107,7 @@ ist ohne laufende Kosten nicht lokal machbar. Deshalb gibt es diese Varianten:
 - [x] Foto-Schätzung auch als ganzes Gericht (Restaurant), Ergebnis vor dem Eintragen korrigierbar
 - [x] Hell/Dunkel/System und wählbare Akzentfarbe
 - [x] Scan getestet (Nutzer, iPhone). Nach dem Scannen lassen sich falsche Datenbank-Werte direkt ändern („Werte stimmen nicht? Hier ändern“), die Menge bleibt erhalten und die Änderung gilt dauerhaft
+- [x] Update-Problem auf dem iPhone (Version v6): Der Service Worker lädt jetzt online zuerst aus dem Netz, übernimmt neue Versionen sofort (skipWaiting) und lädt die App neu. Beim Vorab-Laden wird der HTTP-Zwischenspeicher umgangen. Neu: Version, „Auf Update prüfen“ und „Neu laden“ unter Profil → Daten. Die Logik ist per Node-Simulation getestet, ein echter Test auf dem iPhone steht aus
 - [ ] Foto-Schätzung mit echtem Schlüssel auf dem iPhone testen (Nutzer prüft) (im Browser-Test war die Kamera gesperrt, es gab keinen Schlüssel)
 - [ ] Test auf dem iPhone in Safari (steht noch aus)
 - [ ] Hosting auf GitHub Pages (Repo ist angelegt, Pages-Einstellung noch offen)

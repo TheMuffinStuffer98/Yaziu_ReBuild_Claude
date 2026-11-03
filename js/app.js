@@ -34,6 +34,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = 'gemini-2.5-flash';
+  const APP_VERSION = 'v6'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -721,6 +722,15 @@
         </div>
       </section>
       <section class="card">
+        <h2>App</h2>
+        <p class="muted small">Version ${APP_VERSION}</p>
+        <div class="row">
+          <button data-action="update-now">Auf Update prüfen</button>
+          <button data-action="reset-cache">Neu laden</button>
+        </div>
+        <p class="hint">„Neu laden“ leert nur den Zwischenspeicher der App-Dateien. Deine Einträge bleiben erhalten. Die Verknüpfung auf dem Home-Bildschirm musst du dafür nicht löschen.</p>
+      </section>
+      <section class="card">
         <h2>Quellen</h2>
         <p class="muted small">Produktdaten beim Scannen: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> (Lizenz ODbL, Daten der Community). Barcode-Erkennung: ZXing (Apache-2.0). Beim Scannen wird nur die Barcode-Nummer abgefragt.</p>
       </section>`;
@@ -1321,6 +1331,32 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // Sucht nach einer neuen App-Version. Findet der Browser eine, lädt die App sich über controllerchange neu.
+  async function checkUpdate() {
+    if (!('serviceWorker' in navigator)) return toast('Updates sind in diesem Browser nicht verfügbar.');
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return toast('Noch kein Offline-Modus aktiv. Bitte die App einmal neu öffnen.');
+    try {
+      await reg.update();
+    } catch (err) {
+      return toast('Keine Verbindung. Update-Suche nicht möglich.');
+    }
+    return toast(reg.installing || reg.waiting ? 'Neue Version wird geladen …' : `Du hast die neueste Version (${APP_VERSION}).`);
+  }
+
+  // Leert nur den Zwischenspeicher der App-Dateien. Einträge im localStorage bleiben erhalten.
+  async function resetCache() {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch (err) {
+      /* ohne Service Worker genügt das Neuladen */
+    }
+    window.location.reload();
+  }
+
   function openFoodDialog(id) {
     const food = allFoods().find((f) => f.id === id);
     if (!food) return;
@@ -1593,6 +1629,10 @@
       }
       case 'export':
         return exportProfile();
+      case 'update-now':
+        return checkUpdate();
+      case 'reset-cache':
+        return resetCache();
       default:
         return undefined;
     }
@@ -1869,6 +1909,26 @@
   render();
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+
+    // Übernimmt eine neue Version den Betrieb, lädt die App neu. Ist gerade ein Fenster offen, wird gefragt.
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      const busy = !$('#modal').hidden || !$('#editor').hidden || !$('#dialog').hidden;
+      if (busy) {
+        toast('Neue Version bereit.', 'Neu laden', () => { reloading = true; window.location.reload(); });
+      } else {
+        reloading = true;
+        window.location.reload();
+      }
+    });
+
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      // iPhone-Apps bleiben oft im Hintergrund geöffnet. Beim Zurückkehren nach Updates suchen.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    }).catch(() => {});
   }
 })();

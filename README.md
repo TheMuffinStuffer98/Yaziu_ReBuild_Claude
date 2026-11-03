@@ -82,7 +82,14 @@ Mit einem kostenlosen GitHub-Konto muss das Repository öffentlich sein. Die Nut
 | `js/app.js` | Ansichten und Eingaben |
 | `sw.js` | Offline-Zwischenspeicher |
 
-Nach Änderungen an den App-Dateien in `sw.js` die Version in `CACHE` erhöhen, sonst bleibt die alte Version im Cache.
+Nach Änderungen an den App-Dateien in `sw.js` die Version in `CACHE` erhöhen und `APP_VERSION` in `js/app.js` gleich setzen.
+
+## Updates auf dem iPhone
+
+- Die App lädt online immer die neuesten Dateien und nutzt den Zwischenspeicher nur offline. Neue Versionen übernimmt sie selbst und lädt sich dann neu.
+- GitHub Pages braucht nach einem Push etwa eine Minute, bis die neue Version online ist.
+- Unter **Profil → Daten → App** steht die Version. Dort gibt es „Auf Update prüfen“ und „Neu laden“.
+- Die Verknüpfung auf dem Home-Bildschirm nicht löschen. Auf dem iPhone hat jede Home-Bildschirm-App ihren eigenen Speicher, beim Löschen gehen die Einträge verloren. Vorher unter **Profil → Daten** exportieren.
 
 ## Hinweis
 
