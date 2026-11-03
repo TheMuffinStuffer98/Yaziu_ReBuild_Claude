@@ -95,10 +95,29 @@ ist ohne laufende Kosten nicht lokal machbar. Deshalb gibt es diese Varianten:
 - [x] Export/Import als JSON
 - [x] Lokales Git-Repo ohne KI-Hinweise, Commit ohne Co-Autor-Zeile
 - [x] Logik getestet (Parser, Rechner, Coach per Node), Oberfläche im Browser-Test auf Mobil-Breite geprüft
-- [ ] Offene Stelle im Coach: Gewichtstrend-Bewertung (TODO(human) in `js/coach.js`)
+- [x] Gewichtstrend-Bewertung im Coach, Schwellen aus der Fachliteratur (siehe Abschnitt 10)
+- [x] Icon: Hantel mit Blatt, als SVG (`icons/icon.svg`) und PNG (192, 180, 512 px)
+- [x] Design überarbeitet: Kalorien-Ring im Tagebuch, Makro-Farben, Glas-Tabbar, Dunkelmodus
 - [ ] Test auf dem iPhone in Safari (steht noch aus)
-- [ ] Icon für den Home-Bildschirm (apple-touch-icon als PNG fehlt)
-- [ ] Hosting auf GitHub Pages (Repo auf GitHub anlegen und hochladen, steht aus)
+- [ ] Hosting auf GitHub Pages (Repo ist angelegt, Pages-Einstellung noch offen)
+
+## 10. Gewichtstrend: Schwellen und Quellen
+
+Die Werte beziehen sich auf das Körpergewicht pro Woche. Die Rate entspricht der Differenz des
+7-Tage-Mittels zum Mittel der Woche davor.
+
+| Ziel | Zielbereich | Warnung "zu langsam" | Warnung "zu schnell" |
+|---|---|---|---|
+| Abnehmen | −0,5 bis −1 % | über −0,5 % | unter −1 % |
+| Muskelaufbau | +0,25 bis +0,5 % | unter +0,25 % | über +0,5 % |
+| Halten | ±0,5 % | – | über ±0,5 % |
+
+Quellen:
+- Helms, Aragon, Fitschen (2014): Evidence-based recommendations for natural bodybuilding contest preparation. JISSN. https://pubmed.ncbi.nlm.nih.gov/24864135 — Abnehmen 0,5 bis 1 % pro Woche zum Muskelerhalt.
+- Iraki, Fitschen, Espinar, Helms (2019): Nutrition Recommendations for Bodybuilders in the Off-Season: A Narrative Review. Sports. https://pmc.ncbi.nlm.nih.gov/articles/PMC6680710/ — Zunahme 0,25 bis 0,5 % pro Woche für Fortgeschrittene.
+
+Einschränkung: Die Datenlage speziell für natural Bodybuilder ist dünn. Die Werte sind praxisnahe
+Richtwerte aus Übersichtsarbeiten, keine harten Grenzen. Wassereinlagerungen können die 7-Tage-Werte verzerren.
 
 ## 8. Offene Fragen an dich
 

@@ -113,6 +113,7 @@
         water: dates.reduce((t, d) => t + data.day(d).water, 0) / 7,
       },
       weightRate: recent !== null && prev !== null ? recent - prev : null,
+      weightKg: currentWeight(),
       sessions: data.workouts().filter((w) => w.date >= dates[0] && w.date <= end).length,
       goals: goals(),
       goal: settings().goal,
@@ -154,12 +155,23 @@
 
   // ---------- Ansichten ----------
 
-  function macroBar(label, val, goal) {
+  function macroBar(label, val, goal, tone) {
     const pct = goal > 0 ? Math.min(100, (val / goal) * 100) : 0;
     return `<div class="macro">
       <div class="line"><span>${label}</span><span class="muted">${fmt(val)} / ${fmt(goal)} g</span></div>
-      <div class="track"><div class="fill ${val > goal ? 'over' : ''}" style="width:${pct.toFixed(1)}%"></div></div>
+      <div class="track"><div class="fill tone-${tone} ${val > goal ? 'over' : ''}" style="width:${pct.toFixed(1)}%"></div></div>
     </div>`;
+  }
+
+  // Ring für den Kalorienstand des Tages
+  function ring(eaten, goal) {
+    const R = 52, C = 2 * Math.PI * R;
+    const pct = goal > 0 ? Math.min(1, eaten / goal) : 0;
+    return `<svg viewBox="0 0 120 120" class="ring" aria-hidden="true">
+      <circle cx="60" cy="60" r="${R}" class="ring-bg"/>
+      <circle cx="60" cy="60" r="${R}" class="ring-fg ${eaten > goal ? 'over' : ''}"
+        stroke-dasharray="${(C * pct).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 60 60)"/>
+    </svg>`;
   }
 
   function mealCard(key, label, entries) {
@@ -191,14 +203,21 @@
         <button class="linkish" data-action="today">${dateLabel(state.date)}</button>
         <button class="icon" data-action="day" data-d="1" aria-label="Nächster Tag">›</button>
       </div>
-      <section class="card">
-        <div class="line">
-          <div><span class="big">${fmt(t.kcal)}</span> <span class="muted">von ${fmt(g.kcal)} kcal</span></div>
-          <div class="${left < 0 ? 'over' : 'muted'}">${left >= 0 ? fmt(left) + ' übrig' : fmt(-left) + ' zu viel'}</div>
+      <section class="card hero">
+        <div class="hero-ring">
+          ${ring(t.kcal, g.kcal)}
+          <div class="hero-center">
+            <span class="big">${fmt(Math.abs(left))}</span>
+            <span class="small">${left >= 0 ? 'kcal übrig' : 'kcal zu viel'}</span>
+          </div>
         </div>
-        ${macroBar('Eiweiß', t.p, g.p)}
-        ${macroBar('Fett', t.f, g.f)}
-        ${macroBar('Kohlenhydrate', t.c, g.c)}
+        <div class="hero-side">
+          <div class="muted small">Gegessen</div>
+          <div class="hero-num">${fmt(t.kcal)} <span class="muted small">/ ${fmt(g.kcal)} kcal</span></div>
+          ${macroBar('Eiweiß', t.p, g.p, 'p')}
+          ${macroBar('Fett', t.f, g.f, 'f')}
+          ${macroBar('Kohlenh.', t.c, g.c, 'c')}
+        </div>
       </section>
       <section class="card">
         <h2>Schnelleingabe</h2>
