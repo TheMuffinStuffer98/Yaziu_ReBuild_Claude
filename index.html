@@ -11,27 +11,44 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <script>
+    // Gespeicherte Darstellung sofort anwenden, damit die Seite nicht kurz in der falschen Farbe aufblitzt
+    (function () {
+      try {
+        var t = JSON.parse(localStorage.getItem('ft.theme') || '{}');
+        var r = document.documentElement;
+        if (t.mode === 'light' || t.mode === 'dark') r.setAttribute('data-theme', t.mode);
+        if (t.accent) r.style.setProperty('--accent-base', t.accent);
+      } catch (e) { /* Standard-Darstellung */ }
+    })();
+  </script>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header class="topbar">
-    <span id="title">Tagebuch</span>
-    <span id="profile-badge" class="muted"></span>
+    <div class="topline">
+      <span id="title">Tagebuch</span>
+      <span id="profile-badge" class="muted"></span>
+    </div>
+    <div id="subbar" class="subbar"></div>
   </header>
 
   <main id="view"></main>
 
   <nav class="tabbar" id="tabs" aria-label="Hauptmenü">
     <button data-tab="diary">Tagebuch</button>
-    <button data-tab="weight">Gewicht</button>
-    <button data-tab="train">Training</button>
-    <button data-tab="stats">Auswertung</button>
-    <button data-tab="coach">Coach</button>
-    <button data-tab="more">Mehr</button>
+    <button data-tab="cook">Kochbuch</button>
+    <button data-tab="progress">Fortschritt</button>
+    <button data-tab="profile">Profil</button>
   </nav>
 
+  <div id="editor" class="page" hidden></div>
   <div id="modal" class="modal" hidden></div>
-  <div id="toast" class="toast" role="status" hidden></div>
+  <div id="dialog" class="modal dialog-host" hidden></div>
+  <div id="toast" class="toast" role="status" hidden>
+    <span id="toast-text"></span>
+    <button id="toast-btn" data-action="toast-action" hidden></button>
+  </div>
 
   <script src="js/store.js"></script>
   <script src="js/calc.js"></script>

@@ -10,16 +10,17 @@ Die Planung, Entscheidungen und der Fortschritt stehen in [PROJEKT_STATUS.md](PR
 
 ## Funktionen
 
-- **Tagebuch:** Mahlzeiten pro Tag, Kalorien und Makros, Schnelleingabe per Text, Wasser
-- **Lebensmittel:** Start-Liste mit Richtwerten, eigene Lebensmittel anlegen
-- **Gerichte:** Rezept mit Zutaten und Portionszahl eingeben, die App rechnet auf eine Portion herunter und zeigt, was pro Portion auf den Teller kommt. Mahlzeiten aus dem Tagebuch lassen sich als Gericht speichern.
+Die App hat vier Reiter: **Tagebuch**, **Kochbuch**, **Fortschritt** und **Profil**.
+
+- **Tagebuch:** Mahlzeiten als Liste. Du wählst das Lebensmittel (Bestand, von Hand oder per Barcode), die Nährwerte kommen automatisch, du gibst nur die Menge an. Dazu Gerichte, Foto-Schätzung, „Von gestern übernehmen“, Rückgängig und Wasser.
+- **Kochbuch:** Lebensmittel und Gerichte mit Suche, Favoriten und „Zuletzt benutzt“. Eigene Lebensmittel und Gerichte anlegen und ändern.
+- **Gerichte:** Rezept mit Zutaten und Portionszahl eingeben, die App rechnet auf eine Portion herunter und zeigt, was pro Portion auf den Teller kommt. Mahlzeiten aus dem Tagebuch lassen sich mit einem Namen als Gericht speichern.
 - **Barcode-Scanner:** Verpackte Produkte per Kamera scannen. Die Daten kommen von Open Food Facts und werden danach lokal gespeichert.
-- **Foto-Schätzung (optional):** Kalorien und Zutaten aus einem Foto schätzen, mit einem eigenen kostenlosen Google-Schlüssel (siehe Datenschutz)
-- **Gewicht:** Einträge, Verlauf als Diagramm, Ø der letzten 7 Tage
-- **Training:** Übungen mit Sätzen erfassen, Volumen, geschätzte 1RM als Bestwerte
-- **Auswertung:** Ø der letzten 7 Tage, Kalorien der letzten 14 Tage
-- **Coach:** Regelbasierte Hinweise aus deinen Daten, ohne Server
-- **Rechner:** Grundumsatz, Gesamtumsatz, Kalorien- und Makroziel, Körperfett (Navy-Methode)
+- **Foto-Schätzung (optional):** Kalorien aus einem Foto schätzen, mit einem eigenen kostenlosen Google-Schlüssel (siehe Datenschutz). Entweder pro Zutat oder als ganzes Gericht, z. B. im Restaurant.
+- **Fortschritt:** Umschalter für Gewicht (Verlauf, Ø 7 Tage), Training (Sätze, Volumen, geschätzte 1RM), Auswertung und Coach (regelbasierte Hinweise)
+- **Profil:** Ziele, Darstellung, Daten und Foto-Schlüssel
+- **Ziele:** Automatisch aus Ziel und Körperdaten, mit anpassbarem Eiweiß (g/kg) und Fettanteil, oder komplett selbst vorgegeben. Eiweiß optional auf die Magermasse bezogen (beim Abnehmen).
+- **Darstellung:** Hell, Dunkel oder wie das iPhone, dazu eine wählbare Akzentfarbe
 - **Profile:** Mehrere Personen auf einem Gerät, jede mit eigenen Daten
 - **Backup:** Export und Import als JSON-Datei
 - **Offline:** Nach dem ersten Laden funktioniert die App ohne Netz
@@ -69,7 +70,7 @@ Mit einem kostenlosen GitHub-Konto muss das Repository öffentlich sein. Die Nut
 | `index.html` | Gerüst und Navigation |
 | `css/style.css` | Darstellung, Hell- und Dunkelmodus |
 | `js/store.js` | Lokale Speicherung und Profile |
-| `js/calc.js` | Formeln (Grundumsatz, Ziele, Makros, Navy, 1RM) |
+| `js/calc.js` | Formeln (Grundumsatz, Tagesziele, Eiweiß- und Fett-Richtwerte, Navy, 1RM) |
 | `js/foods.js` | Start-Liste der Lebensmittel |
 | `js/parse.js` | Texteingabe für Lebensmittel und Übungen |
 | `js/coach.js` | Regeln für die Hinweise |

@@ -2,15 +2,28 @@
 // Optional: Es wird ein eigener, kostenloser Schlüssel des Nutzers benötigt. Er bleibt nur im Browser.
 // Das Foto wird verkleinert (ohne Standort-Daten) und nur für die Anfrage gesendet, nicht gespeichert.
 const Vision = (() => {
-  const PROMPT = [
-    'Du bist ein erfahrener Ernährungsberater. Analysiere das Foto einer Mahlzeit.',
-    'Antworte ausschließlich mit JSON in genau dieser Form, ohne weiteren Text:',
-    '{"name": "Name des Gerichts", "confidence": "niedrig|mittel|hoch", "note": "kurzer Hinweis",',
-    ' "items": [{"name": "Zutat", "grams": 0, "kcal": 0, "protein": 0, "fat": 0, "carbs": 0}]}',
-    'Regeln: Menge und Nährwerte beziehen sich auf die sichtbare Portion, nicht auf 100 g.',
-    'Schätze die Mengen anhand von Tellergröße, Besteck und Verpackung. Nenne jede Zutat einzeln.',
-    'Nutze deutsche Namen. Ist kein Essen zu sehen, gib items als leere Liste zurück.',
-  ].join('\n');
+  // Modus 'items': Zutaten einzeln. Modus 'dish': ganzes Gericht (z. B. im Restaurant, Zutaten unbekannt).
+  const PROMPTS = {
+    items: [
+      'Du bist ein erfahrener Ernährungsberater. Analysiere das Foto einer Mahlzeit.',
+      'Antworte ausschließlich mit JSON in genau dieser Form, ohne weiteren Text:',
+      '{"name": "Name des Gerichts", "confidence": "niedrig|mittel|hoch", "note": "kurzer Hinweis",',
+      ' "items": [{"name": "Zutat", "grams": 0, "kcal": 0, "protein": 0, "fat": 0, "carbs": 0}]}',
+      'Regeln: Menge und Nährwerte beziehen sich auf die sichtbare Portion, nicht auf 100 g.',
+      'Schätze die Mengen anhand von Tellergröße, Besteck und Verpackung. Nenne jede Zutat einzeln.',
+      'Nutze deutsche Namen. Ist kein Essen zu sehen, gib items als leere Liste zurück.',
+    ].join('\n'),
+    dish: [
+      'Du bist ein erfahrener Ernährungsberater. Das Foto zeigt ein fertiges Gericht, dessen Zutaten unbekannt sind,',
+      'zum Beispiel aus einem Restaurant. Schätze die gesamte sichtbare Portion.',
+      'Antworte ausschließlich mit JSON in genau dieser Form, ohne weiteren Text:',
+      '{"name": "Name des Gerichts", "confidence": "niedrig|mittel|hoch", "note": "kurzer Hinweis",',
+      ' "grams": 0, "kcal": 0, "protein": 0, "fat": 0, "carbs": 0}',
+      'Regeln: Alle Werte gelten für die gesamte Portion auf dem Foto, nicht pro 100 g.',
+      'Rechne übliche Zubereitung mit ein (Öl, Butter, Saucen, Panade, Beilagen). Nutze deutsche Namen.',
+      'Ist kein Essen zu sehen, setze kcal auf 0.',
+    ].join('\n'),
+  };
 
   // Verkleinert das Bild auf max. 1024 px. Das entfernt auch Metadaten wie den Standort.
   function toJpegBase64(file, max = 1024) {
@@ -64,7 +77,29 @@ const Vision = (() => {
     };
   }
 
-  async function estimate(file, key, model) {
+  // Liest die Antwort im Modus 'dish'. Gibt {name, confidence, note, total} mit Werten für die ganze Portion zurück.
+  function parseDish(text) {
+    const cleaned = String(text).replace(/```json|```/gi, '').trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start < 0 || end < start) throw new Error('Die Antwort war nicht lesbar.');
+    const data = JSON.parse(cleaned.slice(start, end + 1));
+    const kcal = Math.round(num(data.kcal));
+    if (kcal <= 0) throw new Error('Es wurde kein Essen erkannt.');
+    return {
+      name: String(data.name || 'Gericht').slice(0, 80),
+      confidence: String(data.confidence || ''),
+      note: String(data.note || '').slice(0, 300),
+      total: {
+        kcal,
+        p: Math.round(num(data.protein) * 10) / 10,
+        f: Math.round(num(data.fat) * 10) / 10,
+        c: Math.round(num(data.carbs) * 10) / 10,
+      },
+    };
+  }
+
+  async function estimate(file, key, model, mode = 'items') {
     const data = await toJpegBase64(file);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
     const ctl = new AbortController();
@@ -76,7 +111,7 @@ const Vision = (() => {
         signal: ctl.signal,
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: PROMPT }, { inline_data: { mime_type: 'image/jpeg', data } }] }],
+          contents: [{ parts: [{ text: PROMPTS[mode] || PROMPTS.items }, { inline_data: { mime_type: 'image/jpeg', data } }] }],
           generationConfig: { temperature: 0.2 },
         }),
       });
@@ -97,8 +132,9 @@ const Vision = (() => {
     const parts = json.candidates && json.candidates[0] && json.candidates[0].content
       ? json.candidates[0].content.parts : null;
     if (!parts || !parts.length) throw new Error('Keine Antwort erhalten. Bitte mit anderem Foto erneut versuchen.');
-    return parse(parts.map((p) => p.text || '').join(''));
+    const text = parts.map((p) => p.text || '').join('');
+    return mode === 'dish' ? parseDish(text) : parse(text);
   }
 
-  return { estimate, parse };
+  return { estimate, parse, parseDish };
 })();

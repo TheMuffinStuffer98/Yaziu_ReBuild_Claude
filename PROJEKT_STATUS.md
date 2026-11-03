@@ -102,9 +102,29 @@ ist ohne laufende Kosten nicht lokal machbar. Deshalb gibt es diese Varianten:
 - [x] Hinzufügen-Fenster mit Tabs: Suche, Gerichte, Scan, Foto
 - [x] Barcode-Scanner (ZXing lokal in `vendor/`, Produktdaten von Open Food Facts, Zwischenspeicher lokal). Abfrage getestet, Dekodierung mit erzeugtem Barcode getestet
 - [x] Foto-Schätzung über eigenen Gemini-Schlüssel (optional, Schlüssel nicht im Export). Antwort-Parser getestet
+- [x] Umbau der Bedienung nach Test auf dem iPhone: vier Reiter (Tagebuch, Kochbuch, Fortschritt, Profil), Mahlzeiten als Liste mit Auswahl-Fenster, Gericht-Editor im Vollbild, Favoriten und „Zuletzt“, Rückgängig, „Von gestern übernehmen“
+- [x] Eiweiß-Skala anpassbar (g/kg), Fett in % der Kalorien, optional Magermasse-Bezug beim Abnehmen, oder Ziele komplett manuell (Abschnitt 11)
+- [x] Foto-Schätzung auch als ganzes Gericht (Restaurant), Ergebnis vor dem Eintragen korrigierbar
+- [x] Hell/Dunkel/System und wählbare Akzentfarbe
 - [ ] Kamera-Scan und Foto-Schätzung mit echtem Schlüssel auf dem iPhone testen (im Browser-Test war die Kamera gesperrt, es gab keinen Schlüssel)
 - [ ] Test auf dem iPhone in Safari (steht noch aus)
 - [ ] Hosting auf GitHub Pages (Repo ist angelegt, Pages-Einstellung noch offen)
+
+## 11. Tagesziele: Standardwerte und Quellen
+
+Alle Werte lassen sich im Profil ändern oder durch eigene Zahlen ersetzen.
+
+| Ziel | Eiweiß Standard (üblicher Bereich) | Fett |
+|---|---|---|
+| Abnehmen | 2,2 g/kg (2,0–2,6) | 25 % der Kalorien (üblich 15–30 %) |
+| Halten | 1,8 g/kg (1,6–2,0) | 25 % |
+| Muskelaufbau | 1,8 g/kg (1,6–2,2) | 25 % |
+
+- Kohlenhydrate sind der Rest der Kalorien.
+- Beim Abnehmen kann das Eiweiß auf die Magermasse bezogen werden (Standard 2,5 g/kg, üblich 2,3–3,1). Dafür braucht es einen Körperfett-Wert.
+- Fett hat eine Untergrenze von 0,6 g/kg. Das ist eine Vorsichtsregel, keine Studienangabe.
+- Quellen: Morton et al. 2018 (https://pubmed.ncbi.nlm.nih.gov/28698222/), ISSN Position Stand Aragon et al. 2017 (https://jissn.biomedcentral.com/articles/10.1186/s12970-017-0174-y), Helms et al. 2014, Iraki et al. 2019. Einzelne Zahlen (z. B. 2,2 g/kg als vorsichtiger Wert) konnte ich nicht am Originaltext prüfen.
+- Die Bedienung orientiert sich an gängigen Mustern (Suche zuerst, „Zuletzt benutzt“, Favoriten, wenige Reiter). Unabhängige Vergleichstests von Yazio und anderen Apps habe ich nicht gefunden.
 
 ## 10. Gewichtstrend: Schwellen und Quellen
 
