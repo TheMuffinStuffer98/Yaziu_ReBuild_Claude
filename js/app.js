@@ -31,8 +31,11 @@
     [1.9, 'Extrem (Training plus körperliche Arbeit)'],
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
+  const ADD_TABS = [['search', 'Suche'], ['dishes', 'Gerichte'], ['scan', 'Scan'], ['photo', 'Foto']];
+  const DEFAULT_MODEL = 'gemini-2.5-flash';
 
-  const state = { tab: 'diary', date: todayStr(), addMeal: null };
+  // add: Zustand des Hinzufügen-Fensters. draft: Gericht, das gerade bearbeitet wird.
+  const state = { tab: 'diary', date: todayStr(), add: null, draft: null };
 
   // ---------- Daten ----------
 
@@ -53,30 +56,31 @@
     weights: () => Store.get('weights', []),
     workouts: () => Store.get('workouts', []),
     custom: () => Store.get('custom', []),
+    dishes: () => Store.get('dishes', []),
+    products: () => Store.get('products', []),
+    ai: () => ({ key: '', model: DEFAULT_MODEL, ...Store.get('ai', {}) }),
   };
 
-  // Einträge speichern pro 100 g. So lässt sich die Menge später ändern.
-  const totals = (e) => {
-    const k = e.grams / 100;
-    return { kcal: e.base.kcal * k, p: e.base.p * k, f: e.base.f * k, c: e.base.c * k };
-  };
-  function sumEntries(list) {
-    return list.reduce((t, e) => {
-      const x = totals(e);
-      return { kcal: t.kcal + x.kcal, p: t.p + x.p, f: t.f + x.f, c: t.c + x.c };
-    }, { kcal: 0, p: 0, f: 0, c: 0 });
-  }
+  const sumEntries = Calc.sumEntries;
+  const totals = Calc.entryTotals;
 
-  function addEntry(date, meal, food, grams) {
+  // item = {name, grams, unit?, dishId?, base}. base gilt pro 100 g, bei unit 'port' pro Portion.
+  function addEntry(date, meal, item) {
     const day = data.day(date);
-    day.entries.push({
-      id: uid(), meal, name: food.name, grams,
-      base: { kcal: food.kcal, p: food.p, f: food.f, c: food.c },
-    });
+    day.entries.push({ id: uid(), meal, ...item });
     data.saveDay(date, day);
   }
 
-  const allFoods = () => Foods.list(data.custom());
+  const allFoods = () => Foods.list([...data.custom(), ...data.products()]);
+  const foodItem = (food, grams) => ({
+    name: food.name, grams, base: { kcal: food.kcal, p: food.p, f: food.f, c: food.c },
+  });
+
+  function saveProduct(p) {
+    const list = data.products().filter((x) => x.id !== p.id);
+    list.push(p);
+    Store.set('products', list);
+  }
 
   function weightAvg(from, to) {
     const w = data.weights().filter((e) => e.date >= from && e.date <= to);
@@ -174,6 +178,18 @@
     </svg>`;
   }
 
+  const unitLabel = (e) => (e.unit === 'port' ? 'Port.' : 'g');
+  const amountText = (amount, unit) => (unit === 'port' ? `${fmt(amount, 2)} Port.` : `${fmt(amount)} g`);
+
+  // Bei Gerichten: was pro Portion auf den Teller kommt
+  function plateLine(e) {
+    if (!e.dishId) return '';
+    const d = data.dishes().find((x) => x.id === e.dishId);
+    if (!d) return '';
+    const parts = Dish.scaled(d, e.grams).map((i) => `${esc(i.name)} ${amountText(i.amount, i.unit)}`);
+    return `<small class="plate">Teller: ${parts.join(' · ')}</small>`;
+  }
+
   function mealCard(key, label, entries) {
     const list = entries.filter((e) => e.meal === key);
     const kcal = sumEntries(list).kcal;
@@ -183,12 +199,17 @@
         const t = totals(e);
         return `<li>
           <div class="grow"><b>${esc(e.name)}</b>
-            <small class="muted">${fmt(t.kcal)} kcal · E ${fmt(t.p)} · F ${fmt(t.f)} · KH ${fmt(t.c)}</small></div>
-          <input class="grams" type="number" inputmode="decimal" value="${e.grams}" data-change="grams" data-id="${e.id}" aria-label="Gramm">
+            <small class="muted">${fmt(t.kcal)} kcal · E ${fmt(t.p)} · F ${fmt(t.f)} · KH ${fmt(t.c)}</small>
+            ${plateLine(e)}</div>
+          <input class="grams" type="number" step="any" inputmode="decimal" value="${e.grams}" data-change="grams" data-id="${e.id}" aria-label="Menge">
+          <span class="unit">${unitLabel(e)}</span>
           <button class="icon danger" data-action="del-entry" data-id="${e.id}" aria-label="Eintrag löschen">×</button>
         </li>`;
       }).join('')}</ul>` : '<p class="muted small">Noch nichts eingetragen.</p>'}
-      <button class="ghost" data-action="open-add" data-meal="${key}">+ Lebensmittel hinzufügen</button>
+      <div class="row">
+        <button class="ghost" data-action="open-add" data-meal="${key}">+ Hinzufügen</button>
+        ${list.length ? `<button class="ghost" data-action="meal-to-dish" data-meal="${key}">Als Gericht speichern</button>` : ''}
+      </div>
     </section>`;
   }
 
@@ -354,12 +375,86 @@
     return `<label class="field"><span>${label}</span>${input}</label>`;
   }
 
+  // ---------- Gerichte ----------
+
+  function macroLine(t) {
+    return `${fmt(t.kcal)} kcal · E ${fmt(t.p)} · F ${fmt(t.f)} · KH ${fmt(t.c)}`;
+  }
+
+  function renderDishes() {
+    const list = data.dishes();
+    return `
+      <div class="datebar">
+        <button class="linkish" data-action="go" data-to="more">‹ Mehr</button>
+        <span></span>
+      </div>
+      <section class="card">
+        <h2>Meine Gerichte</h2>
+        ${list.length ? `<ul class="list">${list.map((d) => `<li>
+          <div class="grow"><b>${esc(d.name)}</b>
+            <small class="muted">pro Portion: ${macroLine(Dish.perPortion(d))}</small>
+            <small class="muted">Rezept für ${fmt(d.servings, 2)} Portionen · ${d.ingredients.length} Zutaten</small></div>
+          <button data-action="dish-edit" data-id="${d.id}">Ändern</button>
+          <button class="icon danger" data-action="dish-delete" data-id="${d.id}" aria-label="Gericht löschen">×</button>
+        </li>`).join('')}</ul>` : '<p class="muted small">Noch keine Gerichte.</p>'}
+        <button class="ghost" data-action="dish-new">+ Neues Gericht</button>
+        <p class="hint">Gib die Zutaten für das ganze Rezept ein und sage, für wie viele Portionen es reicht. Die App rechnet auf eine Portion herunter und zeigt dir, was pro Portion auf den Teller kommt.</p>
+      </section>`;
+  }
+
+  function plateList(d, portions) {
+    return `<ul class="list">${Dish.scaled(d, portions).map((i) => `<li>
+      <div class="grow"><b>${esc(i.name)}</b></div><span>${amountText(i.amount, i.unit)}</span></li>`).join('')}</ul>`;
+  }
+
+  function renderDishEdit() {
+    const d = state.draft;
+    if (!d) {
+      state.tab = 'dishes';
+      return renderDishes();
+    }
+    const tot = Calc.sumEntries(d.ingredients);
+    const per = Dish.perPortion(d);
+    return `
+      <div class="datebar">
+        <button class="linkish" data-action="dish-cancel">‹ Abbrechen</button>
+        <span></span>
+      </div>
+      <section class="card">
+        <h2>${d.id ? 'Gericht ändern' : 'Neues Gericht'}</h2>
+        <div class="stack">
+          ${field('Name', `<input id="draft-name" value="${esc(d.name)}" placeholder="z. B. Chili con Carne">`)}
+          ${field('Rezept reicht für (Portionen)', `<input id="draft-servings" type="number" step="any" inputmode="decimal" value="${d.servings}" data-change="draft-servings">`)}
+        </div>
+        <h2 class="sub">Zutaten für das ganze Rezept</h2>
+        ${d.ingredients.length ? `<ul class="list">${d.ingredients.map((i, idx) => `<li>
+          <div class="grow"><b>${esc(i.name)}</b>
+            <small class="muted">${fmt(Calc.entryTotals(i).kcal)} kcal</small></div>
+          <input class="grams" type="number" step="any" inputmode="decimal" value="${i.grams}" data-change="draft-amount" data-i="${idx}" aria-label="Menge">
+          <span class="unit">${unitLabel(i)}</span>
+          <button class="icon danger" data-action="draft-del" data-i="${idx}" aria-label="Zutat entfernen">×</button>
+        </li>`).join('')}</ul>` : '<p class="muted small">Noch keine Zutaten.</p>'}
+        <button class="ghost" data-action="open-add-dish">+ Zutat hinzufügen</button>
+      </section>
+      <section class="card">
+        <h2>Ergebnis</h2>
+        <div class="line"><span class="muted">Gesamtes Rezept</span><span>${macroLine(tot)}</span></div>
+        <div class="line"><b>Pro Portion</b><b>${macroLine(per)}</b></div>
+        <h2 class="sub">Pro Portion auf den Teller</h2>
+        ${d.ingredients.length ? plateList(d, 1) : '<p class="muted small">Füge Zutaten hinzu.</p>'}
+      </section>
+      <button class="primary wide" data-action="dish-save">Gericht speichern</button>`;
+  }
+
+  // ---------- Mehr ----------
+
   function renderMore() {
     const s = settings();
     const g = goals();
     const kg = currentWeight();
     const kf = Calc.bodyFat(s);
     const active = Store.activeId();
+    const ai = data.ai();
     const sel = (opts, cur) => opts.map(([v, l]) => `<option value="${v}" ${String(v) === String(cur) ? 'selected' : ''}>${l}</option>`).join('');
 
     return `
@@ -375,6 +470,12 @@
           <dt>Körperfett (Navy)</dt><dd>${kf === null ? 'Taille und Hals eintragen' : fmt(kf, 1) + ' %'}</dd>
         </dl>
         <p class="muted small">Schätzwerte. Körperfett nach Navy-Methode, ±3–4 %.</p>
+      </section>
+
+      <section class="card">
+        <h2>Meine Gerichte</h2>
+        <p class="muted small">${data.dishes().length} gespeichert. Rezepte mit Portionen, schnell auswählbar.</p>
+        <button class="ghost" data-action="go" data-to="dishes">Gerichte verwalten</button>
       </section>
 
       <section class="card">
@@ -401,6 +502,20 @@
         </form>
       </section>
 
+      <section class="card" id="ai-card">
+        <h2>Foto-Schätzung (optional)</h2>
+        <p class="muted small">Schätzt Kalorien und Zutaten aus einem Foto. Dafür brauchst du einen eigenen, kostenlosen Schlüssel von Google (Gemini). Das Foto wird zur Analyse an Google gesendet und nicht gespeichert. Im kostenlosen Tarif darf Google Eingaben zur Produktverbesserung nutzen. Der Schlüssel bleibt nur auf diesem Gerät und ist nicht im Export.</p>
+        <form data-form="ai" class="stack">
+          ${field('API-Schlüssel', `<input name="key" type="password" autocomplete="off" placeholder="${ai.key ? 'gespeichert, zum Ändern neu eingeben' : 'Schlüssel einfügen'}">`)}
+          ${field('Modell', `<input name="model" value="${esc(ai.model)}">`)}
+          <div class="row">
+            <button class="primary">Speichern</button>
+            ${ai.key ? '<button type="button" data-action="ai-clear">Schlüssel entfernen</button>' : ''}
+          </div>
+        </form>
+        <p class="hint">Schlüssel erstellen: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Wenn Google das Modell ändert, hier den Namen anpassen.</p>
+      </section>
+
       <section class="card">
         <h2>Profile auf diesem Gerät</h2>
         <ul class="list">${Store.profiles().map((p) => `
@@ -419,6 +534,11 @@
           <button data-action="export">Exportieren</button>
           <label class="filebtn">Importieren<input type="file" accept="application/json,.json" data-change="import" hidden></label>
         </div>
+      </section>
+
+      <section class="card">
+        <h2>Quellen</h2>
+        <p class="muted small">Produktdaten beim Scannen: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> (Lizenz ODbL, Daten der Community). Barcode-Erkennung: ZXing (Apache-2.0). Beim Scannen wird nur die Barcode-Nummer abgefragt.</p>
       </section>`;
   }
 
@@ -440,10 +560,14 @@
     stats: { title: 'Auswertung', render: renderStats },
     coach: { title: 'Coach', render: renderCoach },
     more: { title: 'Mehr', render: renderMore },
+    dishes: { title: 'Gerichte', render: renderDishes, parent: 'more' },
+    dishEdit: { title: 'Gericht', render: renderDishEdit, parent: 'more' },
   };
 
   function render() {
-    document.querySelectorAll('#tabs [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === state.tab));
+    const v = views[state.tab];
+    const shown = v.parent || state.tab;
+    document.querySelectorAll('#tabs [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === shown));
     const prof = Store.profiles().find((p) => p.id === Store.activeId());
     $('#profile-badge').textContent = prof ? prof.name : '';
     if (!prof) {
@@ -451,12 +575,11 @@
       $('#view').innerHTML = renderWelcome();
       return;
     }
-    const v = views[state.tab];
     $('#title').textContent = v.title;
     $('#view').innerHTML = v.render();
   }
 
-  // ---------- Hilfsfunktionen für Overlay und Meldungen ----------
+  // ---------- Overlay und Meldungen ----------
 
   let toastTimer;
   function toast(msg) {
@@ -464,7 +587,7 @@
     t.textContent = msg;
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 3200);
   }
 
   function openModal(html) {
@@ -473,32 +596,129 @@
   }
 
   function closeModal() {
+    Scanner.stop();
+    state.add = null;
     $('#modal').hidden = true;
     $('#modal').innerHTML = '';
   }
 
-  function openAdd(meal) {
-    state.addMeal = meal;
-    const label = MEALS.find((m) => m[0] === meal)[1];
-    openModal(`
-      <div class="line"><h2>${label}</h2><button class="icon" data-action="close-modal" aria-label="Schließen">×</button></div>
-      <label class="field"><span>Menge in Gramm</span><input id="add-grams" type="number" inputmode="decimal" value="100"></label>
+  const targetLabel = (t) => (t === 'dish' ? 'Zutat hinzufügen' : MEALS.find((m) => m[0] === t)[1]);
+
+  function customForm(ean) {
+    return `<form data-form="custom" class="stack">
+      ${ean ? `<input type="hidden" name="ean" value="${esc(ean)}">` : ''}
+      <input name="name" placeholder="Name" required aria-label="Name">
+      <div class="grid4">
+        ${field('kcal', '<input name="kcal" type="number" step="any" inputmode="decimal" required>')}
+        ${field('Eiweiß', '<input name="p" type="number" step="any" inputmode="decimal" required>')}
+        ${field('Fett', '<input name="f" type="number" step="any" inputmode="decimal" required>')}
+        ${field('KH', '<input name="c" type="number" step="any" inputmode="decimal" required>')}
+      </div>
+      <p class="hint">Werte pro 100 g.</p>
+      <button class="primary">${ean ? 'Speichern und verwenden' : 'Speichern'}</button>
+    </form>`;
+  }
+
+  function addBody(a) {
+    // Zweite Stufe: ein Gericht, Produkt oder nicht gefundener Barcode ist ausgewählt
+    if (a.dishId) {
+      const d = data.dishes().find((x) => x.id === a.dishId);
+      return `<button class="linkish left" data-action="add-back">‹ Zurück</button>
+        <h2>${esc(d.name)}</h2>
+        ${field('Portionen', '<input id="dish-portions" type="number" step="0.25" inputmode="decimal" value="1" data-input="dish-portions">')}
+        <div id="dish-detail"></div>
+        <button class="primary wide" data-action="dish-add">Eintragen</button>`;
+    }
+    if (a.product) {
+      const p = a.product;
+      return `<button class="linkish left" data-action="add-back">‹ Zurück</button>
+        <h2>${esc(p.name)}</h2>
+        <p class="muted small">Pro 100 g: ${fmt(p.kcal)} kcal · E ${fmt(p.p, 1)} · F ${fmt(p.f, 1)} · KH ${fmt(p.c, 1)}</p>
+        ${p.complete === false ? '<div class="note warn">Angaben unvollständig. Bitte mit der Packung vergleichen.</div>' : ''}
+        ${field('Menge in Gramm', `<input id="prod-grams" type="number" step="any" inputmode="decimal" value="${p.piece || 100}">`)}
+        <button class="primary wide" data-action="product-add">Eintragen</button>
+        ${p.source === 'off' ? '<p class="hint">Daten: Open Food Facts (ODbL)</p>' : ''}`;
+    }
+    if (a.notFound) {
+      return `<button class="linkish left" data-action="add-back">‹ Zurück</button>
+        <div class="note warn">${a.error ? esc(a.error) + ' ' : ''}Barcode ${esc(a.notFound)} wurde nicht gefunden. Du kannst das Produkt selbst anlegen.</div>
+        ${customForm(a.notFound)}`;
+    }
+
+    if (a.tab === 'dishes') {
+      const list = data.dishes();
+      return `${list.length ? `<ul class="list pick">${list.map((d) => `<li><button class="pickbtn" data-action="dish-pick" data-id="${d.id}">
+        <b>${esc(d.name)}</b><small class="muted">pro Portion: ${macroLine(Dish.perPortion(d))}</small></button></li>`).join('')}</ul>`
+        : '<p class="muted small">Noch keine Gerichte.</p>'}
+        <button class="ghost" data-action="dish-new-from-add">+ Neues Gericht anlegen</button>`;
+    }
+
+    if (a.tab === 'scan') {
+      return `<div class="scanbox"><video id="scan-video" playsinline muted autoplay></video><div class="scanline"></div></div>
+        <p class="hint" id="scan-status">Kamera wird gestartet …</p>
+        <form data-form="ean" class="row">
+          <input name="ean" inputmode="numeric" pattern="[0-9]{8,14}" placeholder="Nummer manuell eingeben" required aria-label="Barcode-Nummer">
+          <button class="primary">Suchen</button>
+        </form>`;
+    }
+
+    if (a.tab === 'photo') {
+      const ai = data.ai();
+      if (!ai.key) {
+        return `<div class="note">Für die Foto-Schätzung brauchst du einen eigenen, kostenlosen Google-Schlüssel (Gemini).</div>
+          <button class="primary wide" data-action="goto-ai">Schlüssel eintragen</button>`;
+      }
+      if (a.busy) return '<p class="muted">Foto wird analysiert …</p>';
+      if (a.photo) {
+        const ph = a.photo;
+        const tot = Calc.sumEntries(ph.items);
+        return `<h2>${esc(ph.name)}</h2>
+          ${ph.confidence ? `<p class="muted small">Sicherheit: ${esc(ph.confidence)}${ph.note ? ' · ' + esc(ph.note) : ''}</p>` : ''}
+          ${ph.items.length ? `<ul class="list">${ph.items.map((it, i) => `<li>
+            <div class="grow"><b>${esc(it.name)}</b><small class="muted">${macroLine(Calc.entryTotals(it))}</small></div>
+            <input class="grams" type="number" step="any" inputmode="decimal" value="${it.grams}" data-change="photo-grams" data-i="${i}" aria-label="Gramm">
+            <span class="unit">g</span>
+            <button class="icon danger" data-action="photo-del" data-i="${i}" aria-label="Entfernen">×</button>
+          </li>`).join('')}</ul>
+          <div class="line"><b>Summe</b><b>${macroLine(tot)}</b></div>
+          <button class="primary wide" data-action="photo-add">Alle eintragen</button>`
+          : '<div class="note warn">Es wurde kein Essen erkannt.</div>'}
+          <button class="ghost" data-action="photo-reset">Anderes Foto</button>
+          <p class="hint">Das ist eine Schätzung. Abweichungen von 20 bis 30 % sind normal. Bitte Mengen prüfen.</p>`;
+      }
+      return `${a.error ? `<div class="note warn">${esc(a.error)}</div>` : ''}
+        <label class="filebtn bigbtn">Foto aufnehmen oder wählen<input type="file" accept="image/*" data-change="photo" hidden></label>
+        <p class="hint">Das Foto wird verkleinert und zur Analyse an Google gesendet. Es wird nicht gespeichert.</p>`;
+    }
+
+    // Standard: Suche
+    return `${field('Menge in Gramm', '<input id="add-grams" type="number" step="any" inputmode="decimal" value="100">')}
       <input id="add-search" type="search" placeholder="Lebensmittel suchen" autocomplete="off" data-input="search">
       <ul id="add-list" class="list pick"></ul>
       <details>
-        <summary>+ Eigenes Lebensmittel (Werte pro 100 g)</summary>
-        <form data-form="custom" class="stack">
-          <input name="name" placeholder="Name" required aria-label="Name">
-          <div class="grid4">
-            ${field('kcal', '<input name="kcal" type="number" step="any" inputmode="decimal" required>')}
-            ${field('Eiweiß', '<input name="p" type="number" step="any" inputmode="decimal" required>')}
-            ${field('Fett', '<input name="f" type="number" step="any" inputmode="decimal" required>')}
-            ${field('KH', '<input name="c" type="number" step="any" inputmode="decimal" required>')}
-          </div>
-          <button class="primary">Speichern</button>
-        </form>
-      </details>`);
-    renderAddList();
+        <summary>+ Eigenes Lebensmittel</summary>
+        ${customForm('')}
+      </details>`;
+  }
+
+  function renderAdd() {
+    const a = state.add;
+    if (!a) return;
+    Scanner.stop();
+    const sub = a.dishId || a.product || a.notFound;
+    const tabs = ADD_TABS.filter(([k]) => !(a.target === 'dish' && k === 'dishes'));
+    openModal(`
+      <div class="line"><h2>${targetLabel(a.target)}</h2><button class="icon" data-action="close-modal" aria-label="Schließen">×</button></div>
+      ${sub ? '' : `<div class="seg">${tabs.map(([k, l]) => `<button class="${a.tab === k ? 'on' : ''}" data-action="add-tab" data-name="${k}">${l}</button>`).join('')}</div>`}
+      ${addBody(a)}`);
+    if (a.dishId) renderDishDetail();
+    if (!sub && a.tab === 'search') renderAddList();
+    if (!sub && a.tab === 'scan') startScan();
+  }
+
+  function openAdd(target) {
+    state.add = { target, tab: 'search', dishId: null, product: null, notFound: null, photo: null, busy: false, error: '' };
+    renderAdd();
   }
 
   function renderAddList() {
@@ -512,15 +732,114 @@
       || '<li class="muted small">Nichts gefunden. Unten kannst du es anlegen.</li>';
   }
 
+  function renderDishDetail() {
+    const box = $('#dish-detail');
+    if (!box || !state.add || !state.add.dishId) return;
+    const d = data.dishes().find((x) => x.id === state.add.dishId);
+    const portions = n($('#dish-portions').value) || 0;
+    box.innerHTML = `<div class="line"><b>Nährwerte</b><b>${macroLine({
+      kcal: Dish.perPortion(d).kcal * portions, p: Dish.perPortion(d).p * portions,
+      f: Dish.perPortion(d).f * portions, c: Dish.perPortion(d).c * portions,
+    })}</b></div>
+      <h2 class="sub">Auf den Teller</h2>${plateList(d, portions)}`;
+  }
+
+  // ---------- Scanner und Foto ----------
+
+  function setScanStatus(text) {
+    const el = $('#scan-status');
+    if (el) el.textContent = text;
+  }
+
+  function cameraMessage(err) {
+    if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+      return 'Kamera-Zugriff verweigert. Erlaube die Kamera in den Safari-Einstellungen oder gib die Nummer manuell ein.';
+    }
+    return (err && err.message) || 'Kamera konnte nicht gestartet werden.';
+  }
+
+  async function startScan() {
+    const video = $('#scan-video');
+    if (!video) return;
+    try {
+      await Scanner.start(video, onScanned);
+      if (!state.add || state.add.tab !== 'scan') return Scanner.stop();
+      setScanStatus('Halte den Barcode ins Bild.');
+    } catch (err) {
+      setScanStatus(cameraMessage(err));
+    }
+  }
+
+  async function onScanned(ean) {
+    Scanner.stop();
+    await findProduct(ean);
+  }
+
+  async function findProduct(ean) {
+    const a = state.add;
+    if (!a) return;
+    const known = data.products().find((p) => p.ean === ean) || data.custom().find((p) => p.ean === ean);
+    if (known) {
+      a.product = known;
+      return renderAdd();
+    }
+    setScanStatus('Produkt wird gesucht …');
+    try {
+      const p = await Scanner.lookup(ean);
+      if (!state.add) return;
+      if (p) {
+        saveProduct(p);
+        a.product = p;
+      } else {
+        a.notFound = ean;
+      }
+    } catch (err) {
+      if (!state.add) return;
+      a.notFound = ean;
+      a.error = err.message;
+    }
+    renderAdd();
+  }
+
+  async function runPhoto(file) {
+    const a = state.add;
+    if (!a) return;
+    const ai = data.ai();
+    a.busy = true;
+    a.error = '';
+    a.photo = null;
+    renderAdd();
+    try {
+      const result = await Vision.estimate(file, ai.key, ai.model || DEFAULT_MODEL);
+      if (!state.add) return;
+      a.photo = result;
+    } catch (err) {
+      if (!state.add) return;
+      a.error = err.message;
+    }
+    a.busy = false;
+    renderAdd();
+  }
+
   // ---------- Aktionen ----------
+
+  // Fügt fertige Einträge je nach Ziel dem Tagebuch oder dem Gericht im Editor hinzu
+  function commitItems(items) {
+    const target = state.add.target;
+    if (target === 'dish') {
+      state.draft.ingredients.push(...items);
+    } else {
+      items.forEach((it) => addEntry(state.date, target, it));
+    }
+    closeModal();
+    render();
+  }
 
   function pickFood(id) {
     const food = allFoods().find((f) => f.id === id);
     const grams = n($('#add-grams').value);
     if (!food || grams <= 0) return toast('Bitte eine Menge über 0 g angeben.');
-    addEntry(state.date, state.addMeal, food, grams);
-    closeModal();
-    render();
+    commitItems([foodItem(food, grams)]);
   }
 
   function changeGrams(id, value) {
@@ -530,6 +849,46 @@
     if (!e || g <= 0) return render();
     e.grams = g;
     data.saveDay(state.date, day);
+    render();
+  }
+
+  function syncDraft() {
+    const d = state.draft;
+    if (!d) return;
+    const nm = $('#draft-name');
+    if (nm) d.name = nm.value;
+    const sv = $('#draft-servings');
+    if (sv && n(sv.value) > 0) d.servings = n(sv.value);
+    document.querySelectorAll('[data-change="draft-amount"]').forEach((el) => {
+      const g = n(el.value);
+      if (g > 0) d.ingredients[Number(el.dataset.i)].grams = g;
+    });
+  }
+
+  function newDraft(ingredients = []) {
+    state.draft = { id: null, name: '', servings: ingredients.length ? 1 : 2, ingredients };
+    state.tab = 'dishEdit';
+    window.scrollTo(0, 0);
+    render();
+  }
+
+  function saveDish() {
+    syncDraft();
+    const d = state.draft;
+    const name = d.name.trim();
+    if (!name) return toast('Bitte dem Gericht einen Namen geben.');
+    if (!d.ingredients.length) return toast('Füge mindestens eine Zutat hinzu.');
+    if (!(d.servings > 0)) return toast('Die Portionszahl muss größer als 0 sein.');
+    const dish = { id: d.id || 'd' + uid(), name, servings: d.servings, ingredients: d.ingredients };
+    const list = data.dishes();
+    const idx = list.findIndex((x) => x.id === dish.id);
+    if (idx >= 0) list[idx] = dish;
+    else list.push(dish);
+    Store.set('dishes', list);
+    state.draft = null;
+    state.tab = 'dishes';
+    toast('Gericht gespeichert.');
+    window.scrollTo(0, 0);
     render();
   }
 
@@ -546,6 +905,8 @@
         Store.set('weights', d.weights || []);
         Store.set('workouts', d.workouts || []);
         Store.set('custom', d.custom || []);
+        Store.set('dishes', d.dishes || []);
+        Store.set('products', d.products || []);
         state.tab = 'more';
         toast('Import abgeschlossen.');
         render();
@@ -556,11 +917,12 @@
     reader.readAsText(file);
   }
 
+  // Der API-Schlüssel wird bewusst nicht exportiert.
   function exportProfile() {
     const prof = Store.profiles().find((p) => p.id === Store.activeId());
     const payload = {
       app: 'fitness-tagebuch',
-      version: 1,
+      version: 2,
       name: prof ? prof.name : 'Profil',
       data: {
         settings: Store.get('settings', null),
@@ -568,6 +930,8 @@
         weights: data.weights(),
         workouts: data.workouts(),
         custom: data.custom(),
+        dishes: data.dishes(),
+        products: data.products(),
       },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -583,6 +947,10 @@
 
   function handleAction(action, ds) {
     switch (action) {
+      case 'go':
+        state.tab = ds.to;
+        window.scrollTo(0, 0);
+        return render();
       case 'day':
         state.date = addDays(state.date, Number(ds.d));
         return render();
@@ -597,10 +965,87 @@
       }
       case 'open-add':
         return openAdd(ds.meal);
+      case 'open-add-dish':
+        syncDraft();
+        return openAdd('dish');
+      case 'add-tab':
+        state.add.tab = ds.name;
+        state.add.error = '';
+        return renderAdd();
+      case 'add-back':
+        Object.assign(state.add, { dishId: null, product: null, notFound: null, error: '' });
+        return renderAdd();
       case 'pick':
         return pickFood(ds.id);
+      case 'dish-pick':
+        state.add.dishId = ds.id;
+        return renderAdd();
+      case 'dish-add': {
+        const d = data.dishes().find((x) => x.id === state.add.dishId);
+        const portions = n($('#dish-portions').value);
+        if (!d || portions <= 0) return toast('Bitte eine Portionszahl über 0 angeben.');
+        return commitItems([Dish.toEntry(d, portions)]);
+      }
+      case 'product-add': {
+        const grams = n($('#prod-grams').value);
+        if (grams <= 0) return toast('Bitte eine Menge über 0 g angeben.');
+        return commitItems([{ ...foodItem(state.add.product, grams) }]);
+      }
+      case 'photo-del':
+        state.add.photo.items.splice(Number(ds.i), 1);
+        return renderAdd();
+      case 'photo-reset':
+        state.add.photo = null;
+        state.add.error = '';
+        return renderAdd();
+      case 'photo-add':
+        if (!state.add.photo.items.length) return toast('Keine Einträge vorhanden.');
+        return commitItems(state.add.photo.items);
+      case 'goto-ai':
+        closeModal();
+        state.tab = 'more';
+        render();
+        return $('#ai-card').scrollIntoView();
+      case 'ai-clear':
+        Store.set('ai', { key: '', model: data.ai().model });
+        toast('Schlüssel entfernt.');
+        return render();
       case 'close-modal':
         return closeModal();
+      case 'meal-to-dish': {
+        const items = data.day(state.date).entries
+          .filter((e) => e.meal === ds.meal)
+          .map((e) => ({ name: e.name, grams: e.grams, ...(e.unit === 'port' ? { unit: 'port' } : {}), base: { ...e.base } }));
+        return newDraft(items);
+      }
+      case 'dish-new':
+        return newDraft();
+      case 'dish-new-from-add':
+        closeModal();
+        return newDraft();
+      case 'dish-edit': {
+        const d = data.dishes().find((x) => x.id === ds.id);
+        state.draft = JSON.parse(JSON.stringify(d));
+        state.tab = 'dishEdit';
+        window.scrollTo(0, 0);
+        return render();
+      }
+      case 'dish-delete': {
+        const d = data.dishes().find((x) => x.id === ds.id);
+        if (!confirm(`Gericht „${d ? d.name : ''}“ löschen?`)) return undefined;
+        Store.set('dishes', data.dishes().filter((x) => x.id !== ds.id));
+        return render();
+      }
+      case 'dish-save':
+        return saveDish();
+      case 'dish-cancel':
+        state.draft = null;
+        state.tab = 'dishes';
+        return render();
+      case 'draft-del':
+        syncDraft();
+        state.draft.ingredients.splice(Number(ds.i), 1);
+        return render();
       case 'water': {
         const day = data.day(state.date);
         day.water = Math.max(0, day.water + Number(ds.ml));
@@ -625,7 +1070,7 @@
         return render();
       case 'profile-delete': {
         const p = Store.profiles().find((x) => x.id === ds.id);
-        if (!confirm(`Profil „${p ? p.name : ''}“ mit allen Daten löschen? Das kann nicht rückgängig gemacht werden.`)) return;
+        if (!confirm(`Profil „${p ? p.name : ''}“ mit allen Daten löschen? Das kann nicht rückgängig gemacht werden.`)) return undefined;
         Store.deleteProfile(ds.id);
         return render();
       }
@@ -645,9 +1090,9 @@
         Parse.items(get('text')).forEach((item) => {
           const r = Parse.food(item, foods);
           if (r.missing) missing.push(r.missing);
-          else addEntry(state.date, get('meal'), r.food, r.grams);
+          else addEntry(state.date, get('meal'), foodItem(r.food, r.grams));
         });
-        if (missing.length) toast(`Nicht gefunden: ${missing.join(', ')}. Lege es unter „Lebensmittel hinzufügen“ an.`);
+        if (missing.length) toast(`Nicht gefunden: ${missing.join(', ')}. Lege es unter „Hinzufügen“ an.`);
         form.reset();
         return render();
       }
@@ -671,15 +1116,35 @@
         return render();
       }
       case 'custom': {
-        const list = data.custom();
-        list.push({
+        const ean = get('ean');
+        const food = {
           id: 'c' + uid(), name: get('name').trim(),
           kcal: n(get('kcal')), p: n(get('p')), f: n(get('f')), c: n(get('c')),
-        });
+          ...(ean ? { ean } : {}),
+        };
+        const list = data.custom();
+        list.push(food);
         Store.set('custom', list);
-        form.reset();
         toast('Lebensmittel gespeichert.');
+        if (ean && state.add) {
+          Object.assign(state.add, { notFound: null, error: '', product: food });
+          return renderAdd();
+        }
+        form.reset();
         return renderAddList();
+      }
+      case 'ean': {
+        const ean = get('ean').trim();
+        if (!/^\d{8,14}$/.test(ean)) return toast('Die Nummer hat 8 bis 14 Ziffern.');
+        Scanner.stop();
+        return findProduct(ean);
+      }
+      case 'ai': {
+        const cur = data.ai();
+        const key = get('key').trim() || cur.key;
+        Store.set('ai', { key, model: get('model').trim() || DEFAULT_MODEL });
+        toast('Gespeichert.');
+        return render();
       }
       case 'settings': {
         const name = get('name').trim() || 'Ich';
@@ -720,6 +1185,7 @@
   document.addEventListener('click', (e) => {
     const tab = e.target.closest('[data-tab]');
     if (tab) {
+      state.draft = null;
       state.tab = tab.dataset.tab;
       window.scrollTo(0, 0);
       return render();
@@ -735,12 +1201,35 @@
 
   document.addEventListener('change', (e) => {
     const el = e.target;
-    if (el.dataset.change === 'grams') changeGrams(el.dataset.id, el.value);
-    if (el.dataset.change === 'import' && el.files[0]) importFile(el.files[0]);
+    switch (el.dataset.change) {
+      case 'grams':
+        return changeGrams(el.dataset.id, el.value);
+      case 'import':
+        if (el.files[0]) importFile(el.files[0]);
+        return undefined;
+      case 'draft-amount':
+      case 'draft-servings':
+        syncDraft();
+        return render();
+      case 'photo-grams': {
+        const g = n(el.value);
+        if (g > 0) state.add.photo.items[Number(el.dataset.i)].grams = g;
+        return renderAdd();
+      }
+      case 'photo': {
+        const file = el.files[0];
+        el.value = '';
+        if (file) runPhoto(file);
+        return undefined;
+      }
+      default:
+        return undefined;
+    }
   });
 
   document.addEventListener('input', (e) => {
     if (e.target.dataset.input === 'search') renderAddList();
+    if (e.target.dataset.input === 'dish-portions') renderDishDetail();
   });
 
   render();

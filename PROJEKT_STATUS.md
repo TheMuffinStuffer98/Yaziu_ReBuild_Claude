@@ -98,6 +98,11 @@ ist ohne laufende Kosten nicht lokal machbar. Deshalb gibt es diese Varianten:
 - [x] Gewichtstrend-Bewertung im Coach, Schwellen aus der Fachliteratur (siehe Abschnitt 10)
 - [x] Icon: Hantel mit Blatt, als SVG (`icons/icon.svg`) und PNG (192, 180, 512 px)
 - [x] Design überarbeitet: Kalorien-Ring im Tagebuch, Makro-Farben, Glas-Tabbar, Dunkelmodus
+- [x] Gerichte: Zutaten und Portionszahl, Berechnung pro Portion, Teller-Mengen, "Als Gericht speichern" aus dem Tagebuch (keine Fertiggewicht-Funktion, bewusst Portionen)
+- [x] Hinzufügen-Fenster mit Tabs: Suche, Gerichte, Scan, Foto
+- [x] Barcode-Scanner (ZXing lokal in `vendor/`, Produktdaten von Open Food Facts, Zwischenspeicher lokal). Abfrage getestet, Dekodierung mit erzeugtem Barcode getestet
+- [x] Foto-Schätzung über eigenen Gemini-Schlüssel (optional, Schlüssel nicht im Export). Antwort-Parser getestet
+- [ ] Kamera-Scan und Foto-Schätzung mit echtem Schlüssel auf dem iPhone testen (im Browser-Test war die Kamera gesperrt, es gab keinen Schlüssel)
 - [ ] Test auf dem iPhone in Safari (steht noch aus)
 - [ ] Hosting auf GitHub Pages (Repo ist angelegt, Pages-Einstellung noch offen)
 

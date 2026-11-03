@@ -41,5 +41,19 @@ const Calc = (() => {
   // Epley-Formel: geschätztes Maximalgewicht für eine Wiederholung
   const e1rm = (kg, reps) => kg * (1 + reps / 30);
 
-  return { bmr, tdee, goalKcal, macros, bodyFat, e1rm };
+  // Ein Eintrag hat eine Menge (grams) und Werte pro Einheit (base).
+  // unit 'g' (Standard): base gilt pro 100 g. unit 'port': base gilt pro Portion.
+  function entryTotals(e) {
+    const k = e.unit === 'port' ? e.grams : e.grams / 100;
+    return { kcal: e.base.kcal * k, p: e.base.p * k, f: e.base.f * k, c: e.base.c * k };
+  }
+
+  function sumEntries(list) {
+    return list.reduce((t, e) => {
+      const x = entryTotals(e);
+      return { kcal: t.kcal + x.kcal, p: t.p + x.p, f: t.f + x.f, c: t.c + x.c };
+    }, { kcal: 0, p: 0, f: 0, c: 0 });
+  }
+
+  return { bmr, tdee, goalKcal, macros, bodyFat, e1rm, entryTotals, sumEntries };
 })();

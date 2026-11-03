@@ -12,6 +12,9 @@ Die Planung, Entscheidungen und der Fortschritt stehen in [PROJEKT_STATUS.md](PR
 
 - **Tagebuch:** Mahlzeiten pro Tag, Kalorien und Makros, Schnelleingabe per Text, Wasser
 - **Lebensmittel:** Start-Liste mit Richtwerten, eigene Lebensmittel anlegen
+- **Gerichte:** Rezept mit Zutaten und Portionszahl eingeben, die App rechnet auf eine Portion herunter und zeigt, was pro Portion auf den Teller kommt. Mahlzeiten aus dem Tagebuch lassen sich als Gericht speichern.
+- **Barcode-Scanner:** Verpackte Produkte per Kamera scannen. Die Daten kommen von Open Food Facts und werden danach lokal gespeichert.
+- **Foto-Schätzung (optional):** Kalorien und Zutaten aus einem Foto schätzen, mit einem eigenen kostenlosen Google-Schlüssel (siehe Datenschutz)
 - **Gewicht:** Einträge, Verlauf als Diagramm, Ø der letzten 7 Tage
 - **Training:** Übungen mit Sätzen erfassen, Volumen, geschätzte 1RM als Bestwerte
 - **Auswertung:** Ø der letzten 7 Tage, Kalorien der letzten 14 Tage
@@ -51,6 +54,13 @@ Mit einem kostenlosen GitHub-Konto muss das Repository öffentlich sein. Die Nut
 - Alle Einträge werden im `localStorage` des Browsers gespeichert. Es gibt keinen Server und keine Übertragung.
 - Der Browser-Speicher kann gelöscht werden (z. B. bei „Website-Daten löschen“). Deshalb regelmäßig exportieren.
 - Die Lebensmittel-Werte sind Richtwerte. Vor dem Tracken mit der Packung abgleichen.
+- **Scanner:** Es wird nur die Barcode-Nummer an Open Food Facts gesendet. Die Kamera-Bilder bleiben im Gerät. Das Scannen braucht eine HTTPS-Adresse, z. B. GitHub Pages.
+- **Foto-Schätzung:** Nur mit eigenem API-Schlüssel (Google AI Studio). Das Foto wird verkleinert, ohne Standort-Daten, an Google gesendet und nicht gespeichert. Im kostenlosen Tarif kann Google Eingaben zur Produktverbesserung nutzen. Der Schlüssel liegt nur im Browser des Geräts und ist nicht im Export enthalten.
+
+## Quellen und Lizenzen
+
+- Produktdaten: [Open Food Facts](https://world.openfoodfacts.org), Lizenz ODbL, Daten von der Community und teils unvollständig.
+- Barcode-Erkennung: [ZXing](https://github.com/zxing-js/library) (Apache-2.0), Kopie in `vendor/` mit Lizenzdatei.
 
 ## Dateien
 
@@ -63,6 +73,11 @@ Mit einem kostenlosen GitHub-Konto muss das Repository öffentlich sein. Die Nut
 | `js/foods.js` | Start-Liste der Lebensmittel |
 | `js/parse.js` | Texteingabe für Lebensmittel und Übungen |
 | `js/coach.js` | Regeln für die Hinweise |
+| `js/dishes.js` | Gerichte: Portionen und Teller-Mengen |
+| `js/scanner.js` | Kamera-Scan und Produktsuche |
+| `js/vision.js` | Foto-Schätzung |
+| `vendor/` | Barcode-Bibliothek (ZXing) |
+| `icons/` | App-Icon |
 | `js/app.js` | Ansichten und Eingaben |
 | `sw.js` | Offline-Zwischenspeicher |
 
