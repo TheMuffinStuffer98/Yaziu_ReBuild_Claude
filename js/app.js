@@ -6,6 +6,8 @@
   const $ = (sel) => document.querySelector(sel);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const fmt = (x, d = 0) => Number(x || 0).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+  // Kalorien pro 100 g mit einer Nachkommastelle zeigen, wenn sie nicht ganzzahlig sind (1,5 statt 2)
+  const fmtK = (x) => fmt(x, Math.abs(x - Math.round(x)) < 0.05 ? 0 : 1);
   const n = (v) => parseFloat(String(v ?? '').replace(',', '.')) || 0;
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
@@ -34,7 +36,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = 'gemini-2.5-flash';
-  const APP_VERSION = 'v6'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v7'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -412,7 +414,7 @@
 
   function itemRow(kind, x, scope) {
     const sub = kind === 'food'
-      ? `${fmt(x.kcal)} kcal · E ${fmt(x.p, 1)} · F ${fmt(x.f, 1)} · KH ${fmt(x.c, 1)} pro 100 g`
+      ? `${fmtK(x.kcal)} kcal · E ${fmt(x.p, 1)} · F ${fmt(x.f, 1)} · KH ${fmt(x.c, 1)} pro 100 g`
       : `pro Portion: ${macroLine(Dish.perPortion(x))}`;
     let act;
     if (scope === 'picker') act = kind === 'food' ? 'pk-food' : 'pk-dish';
@@ -865,6 +867,38 @@
     </form>`;
   }
 
+  // Nährwerte pro 100 g. Eigene und gescannte Produkte sind direkt änderbar, Standard-Einträge nur lesbar.
+  function valueFields(f) {
+    if (!ownIds().has(f.id)) {
+      return `<p class="muted small">Pro 100 g: ${fmtK(f.kcal)} kcal · E ${fmt(f.p, 1)} · F ${fmt(f.f, 1)} · KH ${fmt(f.c, 1)}</p>`;
+    }
+    const num = (name, label, val) => field(label, `<input id="v-${name}" name="${name}" type="number" step="any" min="0"
+      inputmode="decimal" value="${val}" data-input="amount" required>`);
+    return `<div>
+      <div class="muted small">Nährwerte pro 100 g (änderbar, wird beim Speichern übernommen)</div>
+      <div class="grid4 values">
+        ${num('kcal', 'kcal', f.kcal)}${num('p', 'Eiweiß', f.p)}${num('f', 'Fett', f.f)}${num('c', 'KH', f.c)}
+      </div>
+    </div>`;
+  }
+
+  // Liest die Werte aus den Feldern. Gibt null zurück, wenn es keine Felder gibt (Standard-Eintrag).
+  function readValues() {
+    if (!$('#v-kcal')) return null;
+    return { kcal: n($('#v-kcal').value), p: n($('#v-p').value), f: n($('#v-f').value), c: n($('#v-c').value) };
+  }
+
+  // Speichert geänderte Werte dauerhaft und gibt das aktualisierte Lebensmittel zurück
+  function persistValues(food, vals) {
+    const upd = (list) => list.map((x) => (x.id === food.id
+      ? { ...x, ...vals, ...(x.complete === undefined ? {} : { complete: true }) } : x));
+    Store.set('custom', upd(data.custom()));
+    Store.set('products', upd(data.products()));
+    return allFoods().find((x) => x.id === food.id) || { ...food, ...vals };
+  }
+
+  const valuesChanged = (food, v) => ['kcal', 'p', 'f', 'c'].some((k) => Math.abs((food[k] || 0) - v[k]) > 1e-9);
+
   function pickerBody(p) {
     if (p.view === 'amount' && p.food) {
       const f = p.food;
@@ -873,12 +907,11 @@
       return `<form data-form="amount" class="stack">
         <button type="button" class="linkish left" data-action="pk-back">‹ Zurück</button>
         <h2>${esc(f.name)}</h2>
-        <p class="muted small">Pro 100 g: ${fmt(f.kcal)} kcal · E ${fmt(f.p, 1)} · F ${fmt(f.f, 1)} · KH ${fmt(f.c, 1)}</p>
+        ${valueFields(f)}
         ${f.complete === false ? '<div class="note warn">Angaben unvollständig. Bitte mit der Packung vergleichen.</div>' : ''}
-        ${field('Menge in Gramm', `<input id="amount" name="amount" type="number" step="any" inputmode="decimal" value="${p.keepAmount || f.piece || 100}" data-input="amount" required>`)}
+        ${field('Menge in Gramm', `<input id="amount" name="amount" type="number" step="any" inputmode="decimal" value="${f.piece || 100}" data-input="amount" required>`)}
         <div class="chips">${chips.join('')}</div>
         <div id="amount-preview" class="line"></div>
-        ${ownIds().has(f.id) ? '<button type="button" class="ghost" data-action="pk-edit">Werte stimmen nicht? Hier ändern</button>' : ''}
         <button class="primary wide">Eintragen</button>
         ${p.target !== 'swap' ? '<button type="button" class="ghost" data-action="amount-more">Eintragen und weiteres hinzufügen</button>' : ''}
         ${f.source === 'off' ? '<p class="hint">Daten: Open Food Facts (ODbL)</p>' : ''}
@@ -901,20 +934,16 @@
         <h2>Neues Lebensmittel</h2>
         ${customForm('food-new', null, p.ean, '', p.target ? 'Speichern und Menge wählen' : 'Speichern')}`;
     }
-    if (p.view === 'edit' && p.food) {
-      return `<button type="button" class="linkish left" data-action="pk-edit-back">‹ Zurück</button>
-        <h2>Werte ändern</h2>
-        <p class="muted small">Die Änderung gilt dauerhaft für dieses Produkt. Werte pro 100 g.</p>
-        ${customForm('food-fix', p.food, '', `<input type="hidden" name="id" value="${esc(p.food.id)}">`, 'Speichern')}`;
-    }
     if (p.view === 'info' && p.food) {
       const f = p.food;
-      return `<h2>${esc(f.name)}</h2>
-        <p class="muted small">Pro 100 g: ${fmt(f.kcal)} kcal · E ${fmt(f.p, 1)} · F ${fmt(f.f, 1)} · KH ${fmt(f.c, 1)}</p>
+      return `<form data-form="info-save" class="stack">
+        <h2>${esc(f.name)}</h2>
+        ${valueFields(f)}
+        ${f.complete === false ? '<div class="note warn">Angaben unvollständig. Bitte mit der Packung vergleichen.</div>' : ''}
         <div class="note">Im Kochbuch gespeichert.</div>
-        ${ownIds().has(f.id) ? '<button class="ghost" data-action="pk-edit">Werte stimmen nicht? Hier ändern</button>' : ''}
-        <button class="primary wide" data-action="close-modal">Fertig</button>
-        <p class="hint">Daten: Open Food Facts (ODbL)</p>`;
+        <button class="primary wide">Fertig</button>
+        <p class="hint">Daten: Open Food Facts (ODbL)</p>
+      </form>`;
     }
     if (p.view === 'scan') {
       return `<button type="button" class="linkish left" data-action="pk-back">‹ Zurück</button>
@@ -978,7 +1007,7 @@
     if (!box || !p) return;
     const amount = n($('#amount').value);
     if (p.view === 'amount') {
-      const t = totals({ grams: amount, base: p.food });
+      const t = totals({ grams: amount, base: readValues() || p.food });
       box.innerHTML = `<b>Nährwerte</b><b>${macroLine(t)}</b>`;
     } else {
       const d = data.dishes().find((x) => x.id === p.dishId);
@@ -1370,7 +1399,7 @@
         </div>`);
     } else {
       openDialog(`<h2>${esc(food.name)}</h2>
-        <p class="muted small">Pro 100 g: ${fmt(food.kcal)} kcal · E ${fmt(food.p, 1)} · F ${fmt(food.f, 1)} · KH ${fmt(food.c, 1)}</p>
+        <p class="muted small">Pro 100 g: ${fmtK(food.kcal)} kcal · E ${fmt(food.p, 1)} · F ${fmt(food.f, 1)} · KH ${fmt(food.c, 1)}</p>
         <p class="muted small">Das ist ein Standard-Eintrag mit Richtwerten. Er lässt sich nicht ändern, aber du kannst eine eigene Kopie anlegen.</p>
         <button class="primary wide" data-action="food-copy" data-id="${esc(id)}">Eigene Kopie anlegen</button>
         <button class="linkish" data-action="close-dialog">Schließen</button>`);
@@ -1458,19 +1487,8 @@
       case 'pk-new':
         state.picker.view = 'new';
         return renderPicker();
-      case 'pk-edit': {
-        // Menge merken, damit sie nach dem Ändern nicht verloren geht
-        const amountEl = $('#amount');
-        Object.assign(state.picker, {
-          editFrom: state.picker.view, keepAmount: amountEl ? amountEl.value : null, view: 'edit',
-        });
-        return renderPicker();
-      }
-      case 'pk-edit-back':
-        state.picker.view = state.picker.editFrom || 'amount';
-        return renderPicker();
       case 'pk-back':
-        Object.assign(state.picker, { view: 'list', food: null, dishId: null, error: '', keepAmount: null });
+        Object.assign(state.picker, { view: 'list', food: null, dishId: null, error: '' });
         // Aus dem Kochbuch gibt es keine Liste zum Zurückgehen
         if (!state.picker.target) return closeModal();
         return renderPicker();
@@ -1665,6 +1683,12 @@
       const d = data.dishes().find((x) => x.id === p.dishId);
       return commitItems([Dish.toEntry(d, amount)], more, d.name);
     }
+    // Hat der Nutzer die Werte beim Eintragen geändert, gelten sie ab jetzt dauerhaft für dieses Produkt
+    const vals = readValues();
+    if (vals && valuesChanged(p.food, vals)) {
+      p.food = persistValues(p.food, vals);
+      toast('Geänderte Werte gespeichert.');
+    }
     return commitItems([foodItem(p.food, amount)], more, p.food.name);
   }
 
@@ -1723,21 +1747,16 @@
         toast('Gespeichert.');
         return render();
       }
-      case 'food-fix': {
-        const id = get('id');
-        const next = {
-          name: get('name').trim(), kcal: n(get('kcal')), p: n(get('p')), f: n(get('f')), c: n(get('c')),
-          piece: n(get('piece')) || null,
-        };
-        // Nach eigener Korrektur entfällt der Hinweis auf unvollständige Angaben
-        const upd = (list) => list.map((x) => (x.id === id ? { ...x, ...next, ...(x.complete === undefined ? {} : { complete: true }) } : x));
-        Store.set('custom', upd(data.custom()));
-        Store.set('products', upd(data.products()));
+      case 'info-save': {
+        // Kochbuch-Scan: geänderte Werte speichern und schließen
+        const vals = readValues();
         const p = state.picker;
-        p.food = allFoods().find((x) => x.id === id) || { ...p.food, ...next };
-        p.view = p.editFrom === 'info' ? 'info' : 'amount';
-        toast('Werte gespeichert.');
-        return renderPicker();
+        if (vals && p && p.food && valuesChanged(p.food, vals)) {
+          persistValues(p.food, vals);
+          toast('Werte gespeichert.');
+        }
+        closeModal();
+        return render();
       }
       case 'meal-save': {
         const items = mealEntries(get('meal')).map(stripEntry);

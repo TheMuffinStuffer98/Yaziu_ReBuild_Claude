@@ -63,7 +63,7 @@ const Scanner = (() => {
     return {
       id: 'ean:' + ean,
       name,
-      kcal: Math.round(num(kcal)),
+      kcal: round1(num(kcal)),
       p: round1(num(n.proteins_100g)),
       f: round1(num(n.fat_100g)),
       c: round1(num(n.carbohydrates_100g)),
