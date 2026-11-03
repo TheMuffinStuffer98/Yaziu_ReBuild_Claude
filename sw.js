@@ -1,6 +1,6 @@
 // Service Worker: speichert die App-Dateien, damit sie auch ohne Netz laufen.
 // Bei Änderungen an den Dateien CACHE hochzählen, sonst sieht man die alte Version.
-const CACHE = 'fitness-tagebuch-v4';
+const CACHE = 'fitness-tagebuch-v5';
 const FILES = [
   './',
   './index.html',

@@ -106,7 +106,8 @@ ist ohne laufende Kosten nicht lokal machbar. Deshalb gibt es diese Varianten:
 - [x] Eiweiß-Skala anpassbar (g/kg), Fett in % der Kalorien, optional Magermasse-Bezug beim Abnehmen, oder Ziele komplett manuell (Abschnitt 11)
 - [x] Foto-Schätzung auch als ganzes Gericht (Restaurant), Ergebnis vor dem Eintragen korrigierbar
 - [x] Hell/Dunkel/System und wählbare Akzentfarbe
-- [ ] Kamera-Scan und Foto-Schätzung mit echtem Schlüssel auf dem iPhone testen (im Browser-Test war die Kamera gesperrt, es gab keinen Schlüssel)
+- [x] Scan getestet (Nutzer, iPhone). Nach dem Scannen lassen sich falsche Datenbank-Werte direkt ändern („Werte stimmen nicht? Hier ändern“), die Menge bleibt erhalten und die Änderung gilt dauerhaft
+- [ ] Foto-Schätzung mit echtem Schlüssel auf dem iPhone testen (Nutzer prüft) (im Browser-Test war die Kamera gesperrt, es gab keinen Schlüssel)
 - [ ] Test auf dem iPhone in Safari (steht noch aus)
 - [ ] Hosting auf GitHub Pages (Repo ist angelegt, Pages-Einstellung noch offen)
 

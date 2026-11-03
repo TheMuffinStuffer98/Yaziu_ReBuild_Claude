@@ -865,9 +865,10 @@
         <h2>${esc(f.name)}</h2>
         <p class="muted small">Pro 100 g: ${fmt(f.kcal)} kcal · E ${fmt(f.p, 1)} · F ${fmt(f.f, 1)} · KH ${fmt(f.c, 1)}</p>
         ${f.complete === false ? '<div class="note warn">Angaben unvollständig. Bitte mit der Packung vergleichen.</div>' : ''}
-        ${field('Menge in Gramm', `<input id="amount" name="amount" type="number" step="any" inputmode="decimal" value="${f.piece || 100}" data-input="amount" required>`)}
+        ${field('Menge in Gramm', `<input id="amount" name="amount" type="number" step="any" inputmode="decimal" value="${p.keepAmount || f.piece || 100}" data-input="amount" required>`)}
         <div class="chips">${chips.join('')}</div>
         <div id="amount-preview" class="line"></div>
+        ${ownIds().has(f.id) ? '<button type="button" class="ghost" data-action="pk-edit">Werte stimmen nicht? Hier ändern</button>' : ''}
         <button class="primary wide">Eintragen</button>
         ${p.target !== 'swap' ? '<button type="button" class="ghost" data-action="amount-more">Eintragen und weiteres hinzufügen</button>' : ''}
         ${f.source === 'off' ? '<p class="hint">Daten: Open Food Facts (ODbL)</p>' : ''}
@@ -890,11 +891,18 @@
         <h2>Neues Lebensmittel</h2>
         ${customForm('food-new', null, p.ean, '', p.target ? 'Speichern und Menge wählen' : 'Speichern')}`;
     }
+    if (p.view === 'edit' && p.food) {
+      return `<button type="button" class="linkish left" data-action="pk-edit-back">‹ Zurück</button>
+        <h2>Werte ändern</h2>
+        <p class="muted small">Die Änderung gilt dauerhaft für dieses Produkt. Werte pro 100 g.</p>
+        ${customForm('food-fix', p.food, '', `<input type="hidden" name="id" value="${esc(p.food.id)}">`, 'Speichern')}`;
+    }
     if (p.view === 'info' && p.food) {
       const f = p.food;
       return `<h2>${esc(f.name)}</h2>
         <p class="muted small">Pro 100 g: ${fmt(f.kcal)} kcal · E ${fmt(f.p, 1)} · F ${fmt(f.f, 1)} · KH ${fmt(f.c, 1)}</p>
         <div class="note">Im Kochbuch gespeichert.</div>
+        ${ownIds().has(f.id) ? '<button class="ghost" data-action="pk-edit">Werte stimmen nicht? Hier ändern</button>' : ''}
         <button class="primary wide" data-action="close-modal">Fertig</button>
         <p class="hint">Daten: Open Food Facts (ODbL)</p>`;
     }
@@ -1414,8 +1422,19 @@
       case 'pk-new':
         state.picker.view = 'new';
         return renderPicker();
+      case 'pk-edit': {
+        // Menge merken, damit sie nach dem Ändern nicht verloren geht
+        const amountEl = $('#amount');
+        Object.assign(state.picker, {
+          editFrom: state.picker.view, keepAmount: amountEl ? amountEl.value : null, view: 'edit',
+        });
+        return renderPicker();
+      }
+      case 'pk-edit-back':
+        state.picker.view = state.picker.editFrom || 'amount';
+        return renderPicker();
       case 'pk-back':
-        Object.assign(state.picker, { view: 'list', food: null, dishId: null, error: '' });
+        Object.assign(state.picker, { view: 'list', food: null, dishId: null, error: '', keepAmount: null });
         // Aus dem Kochbuch gibt es keine Liste zum Zurückgehen
         if (!state.picker.target) return closeModal();
         return renderPicker();
@@ -1663,6 +1682,22 @@
         closeDialog();
         toast('Gespeichert.');
         return render();
+      }
+      case 'food-fix': {
+        const id = get('id');
+        const next = {
+          name: get('name').trim(), kcal: n(get('kcal')), p: n(get('p')), f: n(get('f')), c: n(get('c')),
+          piece: n(get('piece')) || null,
+        };
+        // Nach eigener Korrektur entfällt der Hinweis auf unvollständige Angaben
+        const upd = (list) => list.map((x) => (x.id === id ? { ...x, ...next, ...(x.complete === undefined ? {} : { complete: true }) } : x));
+        Store.set('custom', upd(data.custom()));
+        Store.set('products', upd(data.products()));
+        const p = state.picker;
+        p.food = allFoods().find((x) => x.id === id) || { ...p.food, ...next };
+        p.view = p.editFrom === 'info' ? 'info' : 'amount';
+        toast('Werte gespeichert.');
+        return renderPicker();
       }
       case 'meal-save': {
         const items = mealEntries(get('meal')).map(stripEntry);
