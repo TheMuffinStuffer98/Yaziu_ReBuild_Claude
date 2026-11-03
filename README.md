@@ -13,7 +13,7 @@ Die Planung, Entscheidungen und der Fortschritt stehen in [PROJEKT_STATUS.md](PR
 Die App hat vier Reiter: **Tagebuch**, **Kochbuch**, **Fortschritt** und **Profil**.
 
 - **Tagebuch:** Mahlzeiten als Liste. Du wählst das Lebensmittel (Bestand, von Hand oder per Barcode), die Nährwerte kommen automatisch, du gibst nur die Menge an. Dazu Gerichte, Foto-Schätzung, „Von gestern übernehmen“, Rückgängig und Wasser.
-- **Kochbuch:** Lebensmittel und Gerichte mit Suche, Favoriten und „Zuletzt benutzt“. Eigene Lebensmittel und Gerichte anlegen und ändern. Vorinstalliert ist nur Frisches ohne Barcode: Eier, Obst, Gemüse, Fleisch und Fisch von der Theke (roh bzw. geräuchert) sowie Wasser, Kaffee und Tee (Richtwerte, Fettgehalt und Zuschnitt schwanken). Alles andere legst du selbst an, per Barcode-Scan oder von Hand, weil sich Marken in den Werten unterscheiden.
+- **Kochbuch:** Lebensmittel und Gerichte mit Suche, Favoriten und „Zuletzt benutzt“. Eigene Lebensmittel und Gerichte anlegen und ändern. Vorinstalliert ist nur Frisches ohne Barcode: Eier, Obst, Gemüse, rohes Fleisch und roher Fisch sowie Wasser, Kaffee und Tee. Die Werte stammen aus der USDA-Datenbank (SR Legacy, Rohwerte). Deutsche Tabellen und Packungen liegen etwa bei Geflügel oft etwas niedriger, Fettgehalt und Zuschnitt schwanken. Alles andere legst du selbst an, per Barcode-Scan oder von Hand, weil sich Marken in den Werten unterscheiden.
 - **Gerichte:** Rezept mit Zutaten und Portionszahl eingeben, die App rechnet auf eine Portion herunter und zeigt, was pro Portion auf den Teller kommt. Mahlzeiten aus dem Tagebuch lassen sich mit einem Namen als Gericht speichern.
 - **Barcode-Scanner:** Verpackte Produkte per Kamera scannen. Die Daten kommen von Open Food Facts und werden danach lokal gespeichert.
 - **Foto-Schätzung (optional):** Kalorien aus einem Foto schätzen, mit einem eigenen kostenlosen Google-Schlüssel (siehe Datenschutz). Entweder pro Zutat oder als ganzes Gericht, z. B. im Restaurant.
@@ -61,6 +61,7 @@ Mit einem kostenlosen GitHub-Konto muss das Repository öffentlich sein. Die Nut
 ## Quellen und Lizenzen
 
 - Produktdaten: [Open Food Facts](https://world.openfoodfacts.org), Lizenz ODbL, Daten von der Community und teils unvollständig.
+- Start-Liste der Lebensmittel: [USDA FoodData Central](https://fdc.nal.usda.gov/) (SR Legacy, gemeinfrei).
 - Barcode-Erkennung: [ZXing](https://github.com/zxing-js/library) (Apache-2.0), Kopie in `vendor/` mit Lizenzdatei.
 
 ## Dateien
