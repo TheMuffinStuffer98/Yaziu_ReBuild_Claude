@@ -36,7 +36,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = 'gemini-2.5-flash';
-  const APP_VERSION = 'v8'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v9'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -410,7 +410,7 @@
     const q = ls.q.trim().toLowerCase();
     const all = kind === 'food' ? allFoods() : data.dishes();
     const byName = (a, b) => a.name.localeCompare(b.name, 'de');
-    if (q) return all.filter((x) => x.name.toLowerCase().includes(q)).sort(byName);
+    if (q) return all.filter((x) => `${x.name} ${x.alias || ''}`.toLowerCase().includes(q)).sort(byName);
     if (ls.filter === 'recent') {
       return recentIds(kind).map((id) => all.find((x) => x.id === id)).filter(Boolean);
     }

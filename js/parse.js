@@ -26,6 +26,7 @@ const Parse = (() => {
       else if (t.startsWith(n) && n.length >= 2) score = 500 + n.length;
       else if (n.startsWith(t) && t.length >= 4) score = 400 + t.length;
       else if (first.length >= 3 && t.startsWith(first)) score = 100 + first.length;
+      else if ((f.alias || '').split(' ').some((a) => a.length >= 3 && (t === a || t.startsWith(a)))) score = 50;
       if (score > bestScore) {
         best = f;
         bestScore = score;
