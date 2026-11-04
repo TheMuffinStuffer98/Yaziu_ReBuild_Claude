@@ -66,8 +66,9 @@ const Coach = (() => {
       out.push({ level: 'warn', text: `Kalorien Ø ${Math.round(s.avg.kcal)} kcal, Ziel ${g.kcal} kcal. Für Muskelaufbau fehlt Energie.` });
     }
 
-    if (s.avg.water < g.water * 0.8) {
-      out.push({ level: 'info', text: `Wasser Ø ${Math.round(s.avg.water)} ml, Ziel ${g.water} ml.` });
+    // Nur bewerten, wenn überhaupt Wasser eingetragen wurde. Der Durchschnitt zählt nur Tage mit Eintrag.
+    if (s.waterDays > 0 && s.avg.water < g.water * 0.8) {
+      out.push({ level: 'info', text: `Wasser Ø ${Math.round(s.avg.water)} ml an Tagen mit Eintrag, Ziel ${g.water} ml.` });
     }
 
     if (s.sessions < 2) {

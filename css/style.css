@@ -303,12 +303,43 @@ details > summary { color: var(--accent); cursor: pointer; padding: 8px 0; font-
   padding: 4px; border-radius: 14px; background: var(--card); border: 1px solid var(--line);
   margin-bottom: 12px;
 }
-.seg button { border: none; background: none; padding: 9px 4px; border-radius: 10px; color: var(--muted); font-size: 0.9rem; }
+.seg button {
+  border: none; background: none; padding: 9px 2px; border-radius: 10px; color: var(--muted);
+  font-size: 0.9rem; white-space: nowrap;
+}
+.seg:has(button:nth-child(5)) button { font-size: 0.78rem; }
 .seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 
 .swatches { display: flex; gap: 12px; flex-wrap: wrap; margin: 4px 0 14px; }
 .sw { width: 42px; height: 42px; border-radius: 50%; padding: 0; border: 3px solid var(--card); box-shadow: 0 0 0 1px var(--line); }
 .sw.on { box-shadow: 0 0 0 3px var(--accent); }
+
+/* Trainingstabelle */
+.tscroll { overflow-x: auto; margin: 4px -4px 0; padding: 0 4px; }
+.ttable { width: 100%; border-collapse: collapse; font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+.ttable th {
+  text-align: left; font-weight: 600; color: var(--muted); font-size: 0.74rem;
+  padding: 4px 6px 6px; white-space: nowrap; border-bottom: 1px solid var(--line);
+}
+.ttable td { padding: 7px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.ttable tr:last-child td { border-bottom: none; }
+.ttable td:first-child { white-space: normal; font-weight: 600; min-width: 96px; }
+.ttable.edit td { padding: 4px 2px; border-bottom: none; }
+.ttable.edit td:first-child { min-width: 92px; }
+.ttable.edit td:last-child { width: 30px; }
+.ttable.edit input { padding: 8px 6px; width: 100%; font-size: 0.9rem; }
+.ttable.edit .setin { min-width: 54px; text-align: center; }
+.ttable.edit button.icon { padding: 2px 6px; }
+.ttable.edit .setin::placeholder, .ttable.edit input::placeholder { color: var(--muted); opacity: 0.55; }
+.tcard { padding: 12px 14px; }
+.tcard .line { margin-top: 0; }
+.tbtns { flex-wrap: nowrap; }
+.tbtns .ghost { margin-top: 8px; }
+.grow-input { flex: 1; }
+button:disabled { opacity: 0.35; }
+
+details.card > summary { cursor: pointer; font-weight: 650; color: var(--text); padding: 0; }
+details.card[open] > summary { margin-bottom: 8px; }
 
 .scanbox {
   position: relative; width: 100%; aspect-ratio: 4 / 3; overflow: hidden;

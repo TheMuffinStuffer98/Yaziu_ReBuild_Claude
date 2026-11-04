@@ -36,7 +36,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = 'gemini-2.5-flash';
-  const APP_VERSION = 'v10'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v11'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -51,6 +51,9 @@
     draft: null, // Gericht im Editor
     editorReturn: null, // Mahlzeit, zu der nach dem Speichern zurückgekehrt wird
     cook: null, // Such- und Filterzustand im Kochbuch
+    tdraft: null, // Training im Editor
+    pdraft: null, // Trainingsplan im Editor
+    show: { weightAll: false, trainOld: false, trainQ: '', trainLimit: 20 }, // eingeklappte Bereiche
   };
 
   // ---------- Darstellung (pro Gerät) ----------
@@ -115,6 +118,7 @@
     dishes: () => Store.get('dishes', []),
     products: () => Store.get('products', []),
     favs: () => Store.get('favs', []),
+    plans: () => Store.get('plans', []),
     ai: () => ({ key: '', model: DEFAULT_MODEL, ...Store.get('ai', {}) }),
   };
 
@@ -201,12 +205,15 @@
     }, { kcal: 0, p: 0, f: 0, c: 0 });
     const recent = weightAvg(dates[0], end);
     const prev = weightAvg(addDays(dates[0], -7), addDays(dates[0], -1));
+    // Wasser wie die übrigen Werte nur über Tage mit Eintrag mitteln. Tage ohne Eintrag zählen nicht als 0 ml.
+    const waterDays = dates.map((d) => data.day(d).water || 0).filter((v) => v > 0);
 
     return {
       loggedDays: logged.length,
+      waterDays: waterDays.length,
       avg: {
         kcal: sum.kcal / count, p: sum.p / count, f: sum.f / count, c: sum.c / count,
-        water: dates.reduce((t, d) => t + data.day(d).water, 0) / 7,
+        water: waterDays.length ? waterDays.reduce((t, v) => t + v, 0) / waterDays.length : 0,
       },
       weightRate: recent !== null && prev !== null ? recent - prev : null,
       weightKg: currentWeight(),
@@ -491,7 +498,8 @@
   function renderWeight() {
     const rows = [...data.weights()].sort((a, b) => a.date.localeCompare(b.date));
     const avg = weightAvg(addDays(todayStr(), -6), todayStr());
-    const recent = [...rows].reverse().slice(0, 30);
+    const newest = [...rows].reverse();
+    const recent = newest.slice(0, state.show.weightAll ? 60 : 7);
     return `
       <section class="card">
         <h2>Gewicht eintragen</h2>
@@ -509,8 +517,52 @@
           <li><div class="grow"><b>${fmt(r.kg, 1)} kg</b> <small class="muted">${r.date}</small></div>
           <button class="icon danger" data-action="del-weight" data-date="${r.date}" aria-label="Löschen">×</button></li>`).join('')}</ul>`
           : '<p class="muted small">Noch keine Einträge.</p>'}
+        ${newest.length > 7 ? `<button class="ghost" data-action="w-toggle">${state.show.weightAll ? 'Weniger anzeigen' : `Ältere anzeigen (${Math.min(newest.length, 60) - 7})`}</button>` : ''}
       </section>`;
   }
+
+  // ---------- Training: Tabelle, Pläne und Editoren ----------
+
+  const fmtW = (x) => fmt(x, Number.isInteger(x) ? 0 : 1);
+  const setText = (s) => `${fmtW(s.w)} × ${s.r}`; // Anzeige, z. B. 80 × 8
+  const setCell = (s) => `${fmtW(s.w)}x${s.r}`; // Eingabefeld, z. B. 80x8
+  const trainDateLabel = (str) => new Date(str + 'T12:00:00')
+    .toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  const maxSets = (w) => Math.max(3, ...w.exercises.map((e) => e.sets.length));
+  const sortedWorkouts = () => [...data.workouts()]
+    .sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
+  const olderCutoff = () => addDays(todayStr(), -6);
+
+  // Ein Satz als Text: "80x8", "80 x 8", "82,5×6" → {w, r}. Leer → null, ungültig → false.
+  function parseSetCell(txt) {
+    const t = String(txt).trim();
+    if (!t) return null;
+    const m = t.match(/^(\d+(?:[.,]\d+)?)\s*(?:kg)?\s*[x×*]\s*(\d+)$/i);
+    return m ? { w: parseFloat(m[1].replace(',', '.')), r: parseInt(m[2], 10) } : false;
+  }
+
+  // Was beim letzten Mal gemacht wurde: zuerst im letzten Training desselben Plans, sonst im letzten mit dieser Übung
+  function lastSets(exName, planName) {
+    const key = String(exName).trim().toLowerCase();
+    if (!key) return null;
+    const list = sortedWorkouts();
+    const find = (arr) => {
+      for (const w of arr) {
+        const ex = w.exercises.find((e) => e.name.toLowerCase() === key);
+        if (ex) return ex.sets;
+      }
+      return null;
+    };
+    return (planName ? find(list.filter((w) => (w.title || '') === planName)) : null) || find(list);
+  }
+
+  const exerciseNames = () => {
+    const names = new Set();
+    data.plans().forEach((p) => p.exercises.forEach((e) => names.add(e)));
+    data.workouts().forEach((w) => w.exercises.forEach((e) => names.add(e.name)));
+    return [...names].sort((a, b) => a.localeCompare(b, 'de'));
+  };
+  const nameList = () => `<datalist id="ex-names">${exerciseNames().map((n2) => `<option value="${esc(n2)}">`).join('')}</datalist>`;
 
   function bestLifts() {
     const best = {};
@@ -522,40 +574,262 @@
     return Object.values(best).sort((a, b) => b.e1rm - a.e1rm).slice(0, 10);
   }
 
+  // Tabelle: Übung in der ersten Spalte, danach ein Feld pro Satz (mindestens 3)
+  function workoutTable(w) {
+    const cols = maxSets(w);
+    return `<div class="tscroll"><table class="ttable">
+      <thead><tr><th>Übung</th>${Array.from({ length: cols }, (_, i) => `<th>Satz ${i + 1}</th>`).join('')}</tr></thead>
+      <tbody>${w.exercises.map((ex) => `<tr><td>${esc(ex.name)}</td>${Array.from({ length: cols }, (_, i) => `<td>${ex.sets[i] ? setText(ex.sets[i]) : ''}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
   function workoutCard(w) {
     const volume = w.exercises.reduce((t, ex) => t + ex.sets.reduce((s, x) => s + x.w * x.r, 0), 0);
-    return `<section class="card">
-      <div class="line"><h2>${esc(w.title || 'Training')}</h2>
-        <button class="icon danger" data-action="del-workout" data-id="${w.id}" aria-label="Training löschen">×</button></div>
-      <p class="muted small">${w.date} · Volumen ${fmt(volume)} kg</p>
-      <ul class="list">${w.exercises.map((ex) => `<li><div class="grow"><b>${esc(ex.name)}</b>
-        <small class="muted">${ex.sets.map((s) => `${fmt(s.w, 1)} × ${s.r}`).join(' · ')}</small></div></li>`).join('')}</ul>
+    return `<section class="card tcard">
+      <div class="line">
+        <div><b>${esc(w.title || 'Training')}</b> <span class="muted small">${trainDateLabel(w.date)}</span></div>
+        <button class="linkish" data-action="t-edit" data-id="${w.id}">Ändern</button>
+      </div>
+      ${workoutTable(w)}
+      <p class="muted small">Volumen ${fmt(volume)} kg</p>
     </section>`;
   }
 
+  // Trainings, die älter als eine Woche sind. Mit Suche und Seitenweise-Anzeige.
+  function olderHtml() {
+    let list = sortedWorkouts().filter((w) => w.date < olderCutoff());
+    const q = state.show.trainQ.trim().toLowerCase();
+    if (q) {
+      list = list.filter((w) => `${w.title || ''} ${w.date} ${trainDateLabel(w.date)} ${w.exercises.map((e) => e.name).join(' ')}`
+        .toLowerCase().includes(q));
+    }
+    const shown = list.slice(0, state.show.trainLimit);
+    const rest = list.length - shown.length;
+    return (shown.map(workoutCard).join('') || '<p class="muted small">Nichts gefunden.</p>')
+      + (rest > 0 ? `<button class="ghost" data-action="t-more">Mehr anzeigen (${rest})</button>` : '');
+  }
+
   function renderTrain() {
-    const list = [...data.workouts()].sort((a, b) => b.date.localeCompare(a.date));
+    const all = sortedWorkouts();
+    const recent = all.filter((w) => w.date >= olderCutoff());
+    const olderCount = all.length - recent.length;
     const lifts = bestLifts();
     return `
-      <section class="card">
-        <h2>Training eintragen</h2>
-        <form data-form="workout" class="stack">
-          <div class="row">
-            <input name="date" type="date" value="${todayStr()}" required aria-label="Datum">
-            <input name="title" placeholder="Name, z. B. Push A" aria-label="Name des Trainings">
-          </div>
-          <textarea name="lines" rows="6" required placeholder="Bankdrücken 80 x 8, 80 x 8, 82.5 x 6"></textarea>
-          <button class="primary">Speichern</button>
-        </form>
-        <p class="hint">Eine Zeile pro Übung. Format: Name Gewicht x Wdh, Gewicht x Wdh.</p>
+      <button class="primary wide" data-action="t-new">+ Training eintragen</button>
+      <h2 class="sub">Letzte 7 Tage</h2>
+      ${recent.length ? recent.map(workoutCard).join('') : '<p class="muted small">Keine Trainings in den letzten 7 Tagen.</p>'}
+      ${olderCount ? (state.show.trainOld
+    ? `<section class="card">
+        <div class="line"><h2>Ältere Trainings</h2><button class="linkish" data-action="t-old-hide">Ausblenden</button></div>
+        <input type="search" placeholder="Suchen (Plan, Übung, Datum)" autocomplete="off" value="${esc(state.show.trainQ)}" data-input="tq" aria-label="Ältere Trainings suchen">
       </section>
-      <section class="card">
-        <h2>Bestwerte (geschätzte 1RM)</h2>
+      <div id="train-old">${olderHtml()}</div>`
+    : `<button class="ghost" data-action="t-old-show">Ältere Trainings anzeigen (${olderCount})</button>`) : ''}
+      <details class="card">
+        <summary>Bestwerte (geschätzte 1RM)</summary>
         ${lifts.length ? `<ul class="list">${lifts.map((l) => `<li><div class="grow"><b>${esc(l.name)}</b>
-          <small class="muted">${fmt(l.w, 1)} kg × ${l.r} · ${l.date}</small></div><span>${fmt(l.e1rm, 1)} kg</span></li>`).join('')}</ul>`
-          : '<p class="muted small">Noch keine Sätze erfasst.</p>'}
-      </section>
-      ${list.slice(0, 20).map(workoutCard).join('')}`;
+          <small class="muted">${fmtW(l.w)} kg × ${l.r} · ${l.date}</small></div><span>${fmt(l.e1rm, 1)} kg</span></li>`).join('')}</ul>`
+    : '<p class="muted small">Noch keine Sätze erfasst.</p>'}
+      </details>`;
+  }
+
+  // ---------- Pläne (Vorlagen für Trainingstage) ----------
+
+  function renderPlans() {
+    const plans = data.plans();
+    return `
+      <button class="primary wide" data-action="p-new">+ Neuer Plan</button>
+      ${plans.length ? plans.map((p) => `<section class="card tcard">
+        <div class="line"><b>${esc(p.name)}</b><button class="linkish" data-action="p-edit" data-id="${p.id}">Ändern</button></div>
+        <p class="muted small">${p.exercises.length ? p.exercises.map(esc).join(' · ') : 'Keine Übungen'}</p>
+        <button class="ghost" data-action="t-from-plan" data-id="${p.id}">Training mit diesem Plan starten</button>
+      </section>`).join('')
+    : `<section class="card"><p class="muted small">Noch keine Pläne. Ein Plan ist die Vorlage für einen Trainingstag, zum Beispiel „Push A“ mit allen Übungen. Damit musst du die Übungen nicht jedes Mal neu eintragen.</p></section>`}`;
+  }
+
+  // ---------- Training-Editor (Vollbild) ----------
+
+  function openTrainEditor(w, plan) {
+    state.draft = null;
+    state.pdraft = null;
+    if (w) {
+      const cols = maxSets(w);
+      state.tdraft = {
+        id: w.id, date: w.date, planId: w.planId || '', planName: w.title || '', setCount: cols,
+        rows: w.exercises.map((ex) => ({
+          name: ex.name, sets: Array.from({ length: cols }, (_, i) => (ex.sets[i] ? setCell(ex.sets[i]) : '')),
+        })),
+      };
+    } else {
+      state.tdraft = {
+        id: null, date: todayStr(), planId: plan ? plan.id : '', planName: plan ? plan.name : '', setCount: 3,
+        rows: plan && plan.exercises.length
+          ? plan.exercises.map((name) => ({ name, sets: ['', '', ''] }))
+          : [{ name: '', sets: ['', '', ''] }],
+      };
+    }
+    renderEditor();
+  }
+
+  // Liest die Felder des Editors in den Entwurf
+  function syncTDraft() {
+    const d = state.tdraft;
+    if (!d) return;
+    const dt = $('#t-date');
+    if (dt && dt.value) d.date = dt.value;
+    d.rows = [...document.querySelectorAll('#editor [data-trow]')].map((tr) => ({
+      name: tr.querySelector('[data-tname]').value,
+      sets: [...tr.querySelectorAll('[data-tset]')].map((i) => i.value),
+    }));
+  }
+
+  function renderTrainEditor(host) {
+    const d = state.tdraft;
+    const keep = host.querySelector('.page-body') ? host.querySelector('.page-body').scrollTop : 0;
+    const plans = data.plans();
+    const rows = d.rows.map((r, i) => {
+      const last = lastSets(r.name, d.planName) || [];
+      return `<tr data-trow>
+        <td><input data-tname list="ex-names" value="${esc(r.name)}" placeholder="Übung" autocomplete="off" aria-label="Übung" data-change="tname"></td>
+        ${Array.from({ length: d.setCount }, (_, j) => `<td><input data-tset class="setin" value="${esc(r.sets[j] || '')}"
+          placeholder="${last[j] ? esc(setCell(last[j])) : '80x8'}" autocomplete="off" aria-label="Satz ${j + 1}"></td>`).join('')}
+        <td><button class="icon danger" data-action="t-del-ex" data-i="${i}" aria-label="Übung entfernen">×</button></td>
+      </tr>`;
+    }).join('');
+    host.innerHTML = `
+      <div class="page-head">
+        <button class="linkish" data-action="train-close">Abbrechen</button>
+        <b>${d.id ? 'Training ändern' : 'Training eintragen'}</b>
+        <button class="linkish strong" data-action="train-save">Speichern</button>
+      </div>
+      <div class="page-body">
+        <section class="card">
+          <div class="grid2">
+            ${field('Datum', `<input id="t-date" type="date" value="${d.date}">`)}
+            ${field('Plan', `<select id="t-plan" data-change="t-plan">
+              <option value="">Kein Plan</option>
+              ${plans.map((p) => `<option value="${p.id}" ${p.id === d.planId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+            </select>`)}
+          </div>
+        </section>
+        <section class="card">
+          <div class="tscroll"><table class="ttable edit">
+            <thead><tr><th>Übung</th>${Array.from({ length: d.setCount }, (_, j) => `<th>Satz ${j + 1}</th>`).join('')}<th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table></div>
+          <div class="row tbtns">
+            <button class="ghost" data-action="t-add-ex">+ Übung</button>
+            <button class="ghost" data-action="t-add-set">+ Satz</button>
+            ${d.setCount > 1 ? '<button class="ghost" data-action="t-del-set">− Satz</button>' : ''}
+          </div>
+          <p class="hint">Pro Satz: Gewicht x Wiederholungen, zum Beispiel 80x8 oder 82,5x6. Nicht gemachte Sätze leer lassen. Grau siehst du, was du beim letzten Mal gemacht hast.</p>
+        </section>
+        <button class="ghost" data-action="t-save-plan">Diese Übungen als Plan speichern</button>
+        ${d.id ? '<button class="ghost danger-btn" data-action="t-delete">Training löschen</button>' : ''}
+        ${nameList()}
+      </div>`;
+    host.hidden = false;
+    host.querySelector('.page-body').scrollTop = keep;
+  }
+
+  function saveTraining() {
+    syncTDraft();
+    const d = state.tdraft;
+    if (!d.date) return toast('Bitte ein Datum wählen.');
+    const exercises = [];
+    for (let i = 0; i < d.rows.length; i += 1) {
+      const r = d.rows[i];
+      const name = r.name.trim();
+      const sets = [];
+      for (let j = 0; j < r.sets.length; j += 1) {
+        const s = parseSetCell(r.sets[j]);
+        if (s === false) return toast(`„${r.sets[j]}“ bei ${name || 'Übung ' + (i + 1)} nicht lesbar. Format: 80x8`);
+        if (s) sets.push(s);
+      }
+      if (!name && !sets.length) continue; // leere Zeile
+      if (!name) return toast('Bitte jeder Übung mit Sätzen einen Namen geben.');
+      if (sets.length) exercises.push({ name, sets });
+    }
+    if (!exercises.length) return toast('Trage mindestens eine Übung mit einem Satz ein.');
+    const plan = data.plans().find((p) => p.id === d.planId);
+    const workout = {
+      id: d.id || 'w' + uid(), date: d.date, title: plan ? plan.name : d.planName, planId: d.planId || '', exercises,
+    };
+    const list = data.workouts();
+    const idx = list.findIndex((x) => x.id === workout.id);
+    if (idx >= 0) list[idx] = workout;
+    else list.push(workout);
+    Store.set('workouts', list);
+    state.tdraft = null;
+    renderEditor();
+    toast('Training gespeichert.');
+    render();
+  }
+
+  // ---------- Plan-Editor (Vollbild) ----------
+
+  function openPlanEditor(plan) {
+    state.draft = null;
+    state.tdraft = null;
+    state.pdraft = plan
+      ? { id: plan.id, name: plan.name, exercises: [...plan.exercises] }
+      : { id: null, name: '', exercises: [''] };
+    renderEditor();
+  }
+
+  function syncPDraft() {
+    const d = state.pdraft;
+    if (!d) return;
+    const nm = $('#p-name');
+    if (nm) d.name = nm.value;
+    d.exercises = [...document.querySelectorAll('#editor [data-pex]')].map((i) => i.value);
+  }
+
+  function renderPlanEditor(host) {
+    const d = state.pdraft;
+    const keep = host.querySelector('.page-body') ? host.querySelector('.page-body').scrollTop : 0;
+    host.innerHTML = `
+      <div class="page-head">
+        <button class="linkish" data-action="p-close">Abbrechen</button>
+        <b>${d.id ? 'Plan ändern' : 'Neuer Plan'}</b>
+        <button class="linkish strong" data-action="p-save">Speichern</button>
+      </div>
+      <div class="page-body">
+        <section class="card">
+          ${field('Name des Plans', `<input id="p-name" value="${esc(d.name)}" placeholder="z. B. Push A" autocomplete="off">`)}
+          <h2 class="sub">Übungen in der Reihenfolge</h2>
+          <ul class="list">${d.exercises.map((ex, i) => `<li>
+            <input data-pex list="ex-names" class="grow-input" value="${esc(ex)}" placeholder="Übung" autocomplete="off" aria-label="Übung ${i + 1}">
+            <button class="icon" data-action="p-up" data-i="${i}" aria-label="Nach oben" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button class="icon" data-action="p-down" data-i="${i}" aria-label="Nach unten" ${i === d.exercises.length - 1 ? 'disabled' : ''}>↓</button>
+            <button class="icon danger" data-action="p-del-ex" data-i="${i}" aria-label="Übung entfernen">×</button>
+          </li>`).join('')}</ul>
+          <button class="ghost" data-action="p-add-ex">+ Übung</button>
+        </section>
+        ${d.id ? '<button class="ghost danger-btn" data-action="p-delete">Plan löschen</button>' : ''}
+        ${nameList()}
+      </div>`;
+    host.hidden = false;
+    host.querySelector('.page-body').scrollTop = keep;
+  }
+
+  function savePlan() {
+    syncPDraft();
+    const d = state.pdraft;
+    const name = d.name.trim();
+    const exercises = d.exercises.map((e) => e.trim()).filter(Boolean);
+    if (!name) return toast('Bitte dem Plan einen Namen geben.');
+    if (!exercises.length) return toast('Füge mindestens eine Übung hinzu.');
+    const plan = { id: d.id || 'pl' + uid(), name, exercises };
+    const list = data.plans();
+    const idx = list.findIndex((x) => x.id === plan.id);
+    if (idx >= 0) list[idx] = plan;
+    else list.push(plan);
+    Store.set('plans', list);
+    state.pdraft = null;
+    renderEditor();
+    toast('Plan gespeichert.');
+    render();
   }
 
   function barRows() {
@@ -580,7 +854,9 @@
         ${row('Eiweiß', s.avg.p, g.p, 'g')}
         ${row('Fett', s.avg.f, g.f, 'g')}
         ${row('Kohlenhydrate', s.avg.c, g.c, 'g')}
-        ${row('Wasser', s.avg.water, g.water, 'ml')}
+        ${s.waterDays
+    ? row('Wasser', s.avg.water, g.water, 'ml')
+    : '<div class="line"><span>Wasser</span><span class="muted">nichts eingetragen</span></div>'}
         <div class="line"><span>Gewichtstrend</span><span>${trend}</span></div>
         <div class="line"><span>Trainings</span><span>${s.sessions}</span></div>
       </section>
@@ -600,8 +876,10 @@
 
   function renderProgress() {
     const sub = state.sub.progress;
-    const body = { weight: renderWeight, train: renderTrain, stats: renderStats, coach: renderCoach }[sub];
-    return seg('progress', [['weight', 'Gewicht'], ['train', 'Training'], ['stats', 'Auswertung'], ['coach', 'Coach']], sub) + body();
+    const body = {
+      weight: renderWeight, train: renderTrain, plans: renderPlans, stats: renderStats, coach: renderCoach,
+    }[sub];
+    return seg('progress', [['weight', 'Gewicht'], ['train', 'Training'], ['plans', 'Pläne'], ['stats', 'Auswertung'], ['coach', 'Coach']], sub) + body();
   }
 
   // ---------- Profil ----------
@@ -733,6 +1011,19 @@
         <div class="row">
           <button data-action="export">Exportieren</button>
           <label class="filebtn">Importieren<input type="file" accept="application/json,.json" data-change="import" hidden></label>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Aufräumen</h2>
+        <p class="muted small">Alte Trainings löschen, die du nicht mehr brauchst. Ernährung und Gewicht bleiben unberührt. Das lässt sich nicht rückgängig machen. Vorher am besten exportieren.</p>
+        <div class="row">
+          <select id="prune-months" aria-label="Alter">
+            <option value="1">Älter als 1 Monat</option>
+            <option value="3" selected>Älter als 3 Monate</option>
+            <option value="6">Älter als 6 Monate</option>
+            <option value="12">Älter als 12 Monate</option>
+          </select>
+          <button class="danger-btn" data-action="prune-train">Trainings löschen</button>
         </div>
       </section>
       <section class="card">
@@ -1138,6 +1429,8 @@
 
   function renderEditor() {
     const host = $('#editor');
+    if (state.tdraft) return renderTrainEditor(host);
+    if (state.pdraft) return renderPlanEditor(host);
     const d = state.draft;
     if (!d) {
       host.hidden = true;
@@ -1332,6 +1625,7 @@
         Store.set('dishes', d.dishes || []);
         Store.set('products', d.products || []);
         Store.set('favs', d.favs || []);
+        Store.set('plans', d.plans || []);
         state.tab = 'profile';
         state.sub.profile = 'data';
         toast('Import abgeschlossen.');
@@ -1348,13 +1642,14 @@
     const prof = Store.profiles().find((p) => p.id === Store.activeId());
     const payload = {
       app: 'fitness-tagebuch',
-      version: 3,
+      version: 4,
       name: prof ? prof.name : 'Profil',
       data: {
         settings: Store.get('settings', null),
         days: data.days(),
         weights: data.weights(),
         workouts: data.workouts(),
+        plans: data.plans(),
         custom: data.custom(),
         dishes: data.dishes(),
         products: data.products(),
@@ -1636,9 +1931,136 @@
       case 'del-weight':
         Store.set('weights', data.weights().filter((w) => w.date !== ds.date));
         return render();
-      case 'del-workout':
-        Store.set('workouts', data.workouts().filter((w) => w.id !== ds.id));
+      case 'w-toggle':
+        state.show.weightAll = !state.show.weightAll;
         return render();
+
+      // Training
+      case 't-new':
+        return openTrainEditor(null, null);
+      case 't-edit': {
+        const w = data.workouts().find((x) => x.id === ds.id);
+        return w ? openTrainEditor(w, null) : undefined;
+      }
+      case 't-from-plan': {
+        const plan = data.plans().find((x) => x.id === ds.id);
+        state.sub.progress = 'train';
+        return plan ? openTrainEditor(null, plan) : undefined;
+      }
+      case 't-old-show':
+        state.show.trainOld = true;
+        state.show.trainLimit = 20;
+        return render();
+      case 't-old-hide':
+        state.show.trainOld = false;
+        state.show.trainQ = '';
+        return render();
+      case 't-more':
+        state.show.trainLimit += 20;
+        return render();
+      case 't-add-ex':
+        syncTDraft();
+        state.tdraft.rows.push({ name: '', sets: Array(state.tdraft.setCount).fill('') });
+        return renderEditor();
+      case 't-del-ex':
+        syncTDraft();
+        state.tdraft.rows.splice(Number(ds.i), 1);
+        if (!state.tdraft.rows.length) state.tdraft.rows.push({ name: '', sets: Array(state.tdraft.setCount).fill('') });
+        return renderEditor();
+      case 't-add-set':
+        syncTDraft();
+        if (state.tdraft.setCount >= 8) return toast('Mehr als 8 Sätze pro Übung sind nicht vorgesehen.');
+        state.tdraft.setCount += 1;
+        state.tdraft.rows.forEach((r) => r.sets.push(''));
+        return renderEditor();
+      case 't-del-set': {
+        syncTDraft();
+        const d = state.tdraft;
+        const hasData = d.rows.some((r) => (r.sets[d.setCount - 1] || '').trim());
+        if (hasData && !confirm('Die Werte im letzten Satz gehen verloren. Trotzdem entfernen?')) return undefined;
+        d.setCount -= 1;
+        d.rows.forEach((r) => r.sets.pop());
+        return renderEditor();
+      }
+      case 't-save-plan': {
+        syncTDraft();
+        const names = state.tdraft.rows.map((r) => r.name.trim()).filter(Boolean);
+        if (!names.length) return toast('Trage zuerst mindestens eine Übung ein.');
+        return openDialog(`<h2>Als Plan speichern</h2>
+          <form data-form="plan-quick" class="stack">
+            ${field('Name des Plans', `<input name="name" value="${esc(state.tdraft.planName)}" placeholder="z. B. Push A" required autocomplete="off">`)}
+            <p class="hint">Gespeichert werden die Übungen: ${esc(names.join(', '))}</p>
+            <button class="primary wide">Speichern</button>
+            <button type="button" class="linkish" data-action="close-dialog">Abbrechen</button>
+          </form>`);
+      }
+      case 't-delete': {
+        const w = data.workouts().find((x) => x.id === state.tdraft.id);
+        if (!confirm(`Training${w && w.title ? ' „' + w.title + '“' : ''} vom ${w ? trainDateLabel(w.date) : ''} löschen?`)) return undefined;
+        Store.set('workouts', data.workouts().filter((x) => x.id !== state.tdraft.id));
+        state.tdraft = null;
+        renderEditor();
+        toast('Training gelöscht.');
+        return render();
+      }
+      case 'train-save':
+        return saveTraining();
+      case 'train-close':
+        state.tdraft = null;
+        renderEditor();
+        return render();
+      case 'prune-train': {
+        const months = Number($('#prune-months').value);
+        const limit = new Date();
+        limit.setMonth(limit.getMonth() - months);
+        const cut = toDateStr(limit);
+        const old = data.workouts().filter((w) => w.date < cut);
+        if (!old.length) return toast(`Keine Trainings älter als ${months} Monat(e).`);
+        if (!confirm(`${old.length} Training(s) vor dem ${cut} endgültig löschen?`)) return undefined;
+        Store.set('workouts', data.workouts().filter((w) => w.date >= cut));
+        return toast(`${old.length} Training(s) gelöscht.`);
+      }
+
+      // Pläne
+      case 'p-new':
+        return openPlanEditor(null);
+      case 'p-edit': {
+        const plan = data.plans().find((x) => x.id === ds.id);
+        return plan ? openPlanEditor(plan) : undefined;
+      }
+      case 'p-add-ex':
+        syncPDraft();
+        state.pdraft.exercises.push('');
+        return renderEditor();
+      case 'p-del-ex':
+        syncPDraft();
+        state.pdraft.exercises.splice(Number(ds.i), 1);
+        if (!state.pdraft.exercises.length) state.pdraft.exercises.push('');
+        return renderEditor();
+      case 'p-up':
+      case 'p-down': {
+        syncPDraft();
+        const i = Number(ds.i);
+        const j = action === 'p-up' ? i - 1 : i + 1;
+        const list = state.pdraft.exercises;
+        if (j < 0 || j >= list.length) return undefined;
+        [list[i], list[j]] = [list[j], list[i]];
+        return renderEditor();
+      }
+      case 'p-save':
+        return savePlan();
+      case 'p-close':
+        state.pdraft = null;
+        renderEditor();
+        return render();
+      case 'p-delete': {
+        const plan = data.plans().find((x) => x.id === state.pdraft.id);
+        if (!confirm(`Plan „${plan ? plan.name : ''}“ löschen? Bereits eingetragene Trainings bleiben erhalten.`)) return undefined;
+        Store.set('plans', data.plans().filter((x) => x.id !== state.pdraft.id));
+        state.pdraft = null;
+        renderEditor();
+        return render();
+      }
       case 'new-profile':
         return openDialog(`<h2>Neues Profil</h2>
           <form data-form="new-profile" class="stack">
@@ -1804,14 +2226,17 @@
         toast('Gewicht gespeichert.');
         return render();
       }
-      case 'workout': {
-        const exercises = get('lines').split('\n').map(Parse.exercise).filter(Boolean);
-        if (!exercises.length) return toast('Keine gültige Übung erkannt. Format: Name 80 x 8, 80 x 8');
-        const list = data.workouts();
-        list.push({ id: uid(), date: get('date'), title: get('title').trim(), exercises });
-        Store.set('workouts', list);
-        toast('Training gespeichert.');
-        return render();
+      case 'plan-quick': {
+        // Plan aus den Übungen des gerade bearbeiteten Trainings
+        const name = get('name').trim();
+        const names = state.tdraft.rows.map((r) => r.name.trim()).filter(Boolean);
+        const plan = { id: 'pl' + uid(), name, exercises: names };
+        Store.set('plans', [...data.plans(), plan]);
+        state.tdraft.planId = plan.id;
+        state.tdraft.planName = plan.name;
+        closeDialog();
+        toast(`Plan „${name}“ gespeichert.`);
+        return renderEditor();
       }
       case 'ai': {
         const cur = data.ai();
@@ -1899,6 +2324,25 @@
       case 'draft-servings':
         syncDraft();
         return renderEditor();
+      case 'tname':
+        // Übung geändert: Platzhalter mit den Werten vom letzten Mal neu laden
+        syncTDraft();
+        return renderEditor();
+      case 't-plan': {
+        syncTDraft();
+        const d = state.tdraft;
+        const plan = data.plans().find((x) => x.id === el.value);
+        const hasData = d.rows.some((r) => r.sets.some((s) => s.trim()));
+        if (plan && hasData && !confirm('Die Übungen werden durch den Plan ersetzt. Eingetragene Sätze gehen verloren. Fortfahren?')) {
+          return renderEditor();
+        }
+        d.planId = plan ? plan.id : '';
+        d.planName = plan ? plan.name : '';
+        if (plan && plan.exercises.length) {
+          d.rows = plan.exercises.map((name) => ({ name, sets: Array(d.setCount).fill('') }));
+        }
+        return renderEditor();
+      }
       case 'ph-grams': {
         const g = n(el.value);
         if (g > 0) state.photo.result.items[Number(el.dataset.i)].grams = g;
@@ -1932,6 +2376,12 @@
       refreshList(el.dataset.scope);
     }
     if (el.dataset.input === 'amount') renderAmountPreview();
+    if (el.dataset.input === 'tq') {
+      state.show.trainQ = el.value;
+      state.show.trainLimit = 20;
+      const box = $('#train-old');
+      if (box) box.innerHTML = olderHtml();
+    }
   });
 
   window.addEventListener('scroll', updateSubbar, { passive: true });

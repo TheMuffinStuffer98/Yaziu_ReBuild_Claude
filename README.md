@@ -17,7 +17,10 @@ Die App hat vier Reiter: **Tagebuch**, **Kochbuch**, **Fortschritt** und **Profi
 - **Gerichte:** Rezept mit Zutaten und Portionszahl eingeben, die App rechnet auf eine Portion herunter und zeigt, was pro Portion auf den Teller kommt. Mahlzeiten aus dem Tagebuch lassen sich mit einem Namen als Gericht speichern.
 - **Barcode-Scanner:** Verpackte Produkte per Kamera scannen. Die Daten kommen von Open Food Facts und werden danach lokal gespeichert.
 - **Foto-Schätzung (optional):** Kalorien aus einem Foto schätzen, mit einem eigenen kostenlosen Google-Schlüssel (siehe Datenschutz). Entweder pro Zutat oder als ganzes Gericht, z. B. im Restaurant.
-- **Fortschritt:** Umschalter für Gewicht (Verlauf, Ø 7 Tage), Training (Sätze, Volumen, geschätzte 1RM), Auswertung und Coach (regelbasierte Hinweise)
+- **Fortschritt:** Umschalter für Gewicht, Training, Pläne, Auswertung und Coach
+- **Training:** Trainingstage als Tabelle (Datum, Plan, Übungen mit bis zu 3 Sätzen, bei Bedarf mehr). Nachträglich änderbar. Die letzten 7 Tage stehen oben, ältere Trainings blendest du auf Klick ein und kannst sie durchsuchen. Beim Eintragen siehst du grau, was du beim letzten Mal gemacht hast.
+- **Pläne:** Vorlagen für Trainingstage mit Übungen in fester Reihenfolge. Ein Training startest du direkt aus dem Plan.
+- **Gewicht und Auswertung:** Verlauf, Ø 7 Tage, Kalorien und Makros der letzten 7 Tage (Ø nur über Tage mit Einträgen, auch beim Wasser)
 - **Profil:** Ziele, Darstellung, Daten und Foto-Schlüssel
 - **Ziele:** Automatisch aus Ziel und Körperdaten, mit anpassbarem Eiweiß (g/kg) und Fettanteil, oder komplett selbst vorgegeben. Eiweiß optional auf die Magermasse bezogen (beim Abnehmen).
 - **Darstellung:** Hell, Dunkel oder wie das iPhone, dazu eine wählbare Akzentfarbe

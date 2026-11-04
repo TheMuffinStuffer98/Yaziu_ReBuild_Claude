@@ -1,4 +1,4 @@
-// Erkennt Texteingaben wie "80 g Haferflocken, 2 Eier" oder "Bankdrücken 80 x 8, 82.5 x 6".
+// Erkennt Texteingaben für Lebensmittel wie "80 g Haferflocken, 2 Eier".
 // Lokal und ohne Server: reine Textmuster.
 const Parse = (() => {
   const PIECE_UNITS = ['stk', 'stück', 'stueck', 'x'];
@@ -54,15 +54,5 @@ const Parse = (() => {
     return { food: found, grams: Math.round(grams) };
   }
 
-  // "Bankdrücken 80 x 8, 82.5 x 6" -> {name, sets: [{w, r}, ...]}
-  function exercise(line) {
-    const idx = line.search(/\d/);
-    if (idx <= 0) return null;
-    const name = line.slice(0, idx).replace(/[:\-–]\s*$/, '').trim();
-    const sets = [...line.slice(idx).matchAll(/(\d+(?:[.,]\d+)?)\s*(?:kg)?\s*[x×]\s*(\d+)/gi)]
-      .map((m) => ({ w: parseFloat(m[1].replace(',', '.')), r: parseInt(m[2], 10) }));
-    return name && sets.length ? { name, sets } : null;
-  }
-
-  return { items, food, exercise };
+  return { items, food };
 })();
