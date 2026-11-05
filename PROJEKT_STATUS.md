@@ -117,6 +117,7 @@ ist ohne laufende Kosten nicht lokal machbar. Deshalb gibt es diese Varianten:
 - [x] Neuer Reiter „Pläne“ unter Fortschritt: Plan anlegen, ändern, Übungen verschieben, Training aus Plan starten, „Diese Übungen als Plan speichern“ im Training. Gewichtsliste zeigt 7 Einträge, ältere auf Klick
 - [x] Aufräumen unter Profil → Daten: Trainings älter als 1, 3, 6 oder 12 Monate auf Wunsch löschen. Es wird nichts automatisch gelöscht. Export und Import enthalten jetzt die Pläne
 - [x] Version v12 (Rückmeldung vom iPhone-Test): (1) Training-Editor: Datum und Plan überlappen nicht mehr (gleich breite Spalten). (3) Mahlzeiten im Tagebuch sind konfigurierbar (an/aus, Reihenfolge, Umbenennen, eigene), ausgeschaltete mit Einträgen bleiben an ihrem Tag sichtbar. (4) Mengen in Stück: Umschalter Gramm/Stück, Gewicht pro Stück als Feld am Produkt, Umrechnung wird angezeigt (3 Stück × 35 g = 105 g), die letzte Einheit wird pro Produkt gemerkt. (5) „Als Gericht speichern“ erscheint nicht, wenn die Mahlzeit schon ein Gericht ist oder ein Gericht mit denselben Zutaten existiert. (6) Foto-Schätzung: Das voreingestellte Modell gemini-2.5-flash ist laut Googles Abkündigungsliste frühestens ab 16.10.2026 abgeschaltet. Die App sucht jetzt selbst ein verfügbares Flash-Modell (Standard „gemini-flash-latest“) und speichert es, es gibt einen Verbindungstest, einen Abbrechen-Knopf und eine Zeitanzeige, Zeitgrenze 60 Sekunden. (7) Design im Stil der iPhone-Apps. (8) Kochbuch startet ohne Liste, Suche oder Filter blenden Einträge ein
+- [x] Version v13: Serie („Streak“) auf Wunsch eingebaut. Ein Tag zählt, wenn im Tagebuch etwas eingetragen oder ein Training mit diesem Datum gespeichert ist. Die Serie fällt auf 0, wenn ein ganzer Tag ohne Eintrag bleibt. Ist heute noch nichts eingetragen, zählt sie bis gestern und lebt bis zum Tagesende weiter („in Gefahr“-Anzeige). Anzeige im Tagebuch und in der Auswertung (Serie, längste Serie), einmal pro Tag eine kurze Meldung, Schalter unter Profil → Anzeige. Mitteilungen (Push) sind ohne eigenen Server auf dem iPhone nicht möglich und bewusst nicht gebaut, siehe Abschnitt 12
 - [ ] Foto-Schätzung mit echtem Schlüssel auf dem iPhone testen (Nutzer prüft, Verbindungstest unter Profil → Foto) (im Browser-Test war die Kamera gesperrt, es gab keinen Schlüssel)
 - [ ] Test auf dem iPhone in Safari (steht noch aus)
 - [ ] Hosting auf GitHub Pages (Repo ist angelegt, Pages-Einstellung noch offen)
@@ -168,3 +169,14 @@ Richtwerte aus Übersichtsarbeiten, keine harten Grenzen. Wassereinlagerungen k�
 - Fasten-Timer
 - Export als CSV für Auswertungen in Tabellenprogrammen
 - Icon als PNG für den iPhone-Home-Bildschirm
+
+## 12. Mitteilungen zur Serie (Push)
+
+Stand: nicht umgesetzt. Gründe:
+- Eine Web-App auf dem iPhone kann zeitgesteuerte Mitteilungen nur über echten Web-Push bekommen. Dafür muss ein Server die Nachricht an Apples Push-Dienst schicken. Die App hat keinen Server, alle Daten bleiben lokal.
+- Zeitgesteuerte lokale Mitteilungen ohne Server gibt es in Browsern nicht.
+- Ein Push-Server bräuchte pro Nutzer gespeicherte Geräteadressen und müsste wissen, ob heute schon getrackt wurde. Das widerspricht dem Ziel, nichts außerhalb des Geräts zu speichern.
+
+Möglichkeiten:
+1. Ohne Server (aktuell): Erinnerung in der Erinnerungen-App oder Uhr-App des iPhones. Steht als Hinweis unter Profil → Anzeige.
+2. Mit eigenem kleinen Server (z. B. Cloudflare Worker mit Zeitplan): echter Push mit Text wie „Deine Serie: 5 Tage“. Aufwand und Datenschutz müssen vorher entschieden werden.

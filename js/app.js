@@ -41,7 +41,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
-  const APP_VERSION = 'v12'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v13'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -98,6 +98,7 @@
     goal: 'bulk', pace: 300, waist: '', neck: '', hip: '', bodyFat: '',
     targetMode: 'auto', proteinPerKg: '', fatPct: '', leanBasis: false,
     manual: { kcal: '', p: '', f: '', c: '' },
+    showStreak: true,
   });
   const settings = () => {
     const s = Store.get('settings', {});
@@ -371,6 +372,66 @@
     </section>`;
   }
 
+  // ---------- Serie: Tage in Folge mit Tagebuch-Einträgen oder Training ----------
+
+  // Alle Tage bis heute, an denen etwas eingetragen wurde (Essen oder Training)
+  function activeDates() {
+    const today = todayStr();
+    const set = new Set();
+    Object.entries(data.days()).forEach(([d, day]) => { if (day.entries && day.entries.length && d <= today) set.add(d); });
+    data.workouts().forEach((w) => { if (w.date <= today) set.add(w.date); });
+    return set;
+  }
+
+  // current: aktuelle Serie. Ist heute noch nichts eingetragen, zählt sie bis gestern und lebt bis zum Tagesende weiter.
+  // Fehlt auch gestern, ist sie 0. best: längste Serie bisher.
+  function streakInfo() {
+    const act = activeDates();
+    const today = todayStr();
+    const todayDone = act.has(today);
+    let current = 0;
+    for (let d = todayDone ? today : addDays(today, -1); act.has(d); d = addDays(d, -1)) current += 1;
+    let best = 0;
+    let run = 0;
+    let prev = null;
+    [...act].sort().forEach((d) => {
+      run = prev && addDays(prev, 1) === d ? run + 1 : 1;
+      best = Math.max(best, run);
+      prev = d;
+    });
+    return { current, best, todayDone, atRisk: current > 0 && !todayDone };
+  }
+
+  const FLAME = '<svg class="flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22c4 0 7-2.7 7-6.8 0-3.2-2-5.2-3.4-6.7-.4 1.4-1.2 2.2-2.1 2.7C13.7 7.4 12.6 4.4 10.5 2 10.6 6 6 8.5 6 14.2 6 19 8.5 22 12 22z"/></svg>';
+
+  function streakHtml() {
+    if (!settings().showStreak) return '';
+    const s = streakInfo();
+    let msg = 'Heute erledigt.';
+    if (s.atRisk) msg = 'Trage heute noch etwas ein, sonst endet die Serie.';
+    else if (!s.todayDone) msg = 'Trage heute etwas ein, um eine Serie zu starten.';
+    return `<div class="streak ${s.atRisk ? 'risk' : ''} ${s.current ? '' : 'idle'}">
+      ${FLAME}
+      <div class="grow"><b>${s.current} ${s.current === 1 ? 'Tag' : 'Tage'} in Folge</b><small class="muted">${msg}</small></div>
+      ${s.best > s.current ? `<span class="muted small">Rekord ${s.best}</span>` : ''}
+    </div>`;
+  }
+
+  // Einmal pro Tag und Profil kurz melden, dass die Serie gewachsen ist
+  function maybeStreakToast() {
+    if (state.tab !== 'diary' || !settings().showStreak) return;
+    const s = streakInfo();
+    if (!s.todayDone || s.current < 2) return;
+    const key = `ft.streakToast.${Store.activeId()}`;
+    try {
+      if (localStorage.getItem(key) === todayStr()) return;
+      localStorage.setItem(key, todayStr());
+    } catch (err) {
+      return;
+    }
+    toast(`${s.current} Tage in Folge. Weiter so!`);
+  }
+
   function renderDiary() {
     const day = data.day(state.date);
     const g = goals();
@@ -382,6 +443,7 @@
         <p class="muted small">Trage Ziel und Körperdaten ein, oder gib deine Tagesziele selbst vor. Bis dahin gelten Beispielwerte.</p>
         <button class="primary wide" data-action="go-profile">Jetzt einrichten</button>
       </section>`}
+      ${streakHtml()}
       <div class="datebar">
         <button class="icon" data-action="day" data-d="-1" aria-label="Vorheriger Tag">‹</button>
         <button class="linkish" data-action="today">${dateLabel(state.date)}</button>
@@ -895,6 +957,7 @@
 
   function renderStats() {
     const s = weekStats();
+    const streak = streakInfo();
     const g = s.goals;
     const row = (label, val, goal, unit) => `<div class="line"><span>${label}</span>
       <span>${fmt(val)} <span class="muted">/ ${fmt(goal)} ${unit}</span></span></div>`;
@@ -913,6 +976,8 @@
     : '<div class="line"><span>Wasser</span><span class="muted">nichts eingetragen</span></div>'}
         <div class="line"><span>Gewichtstrend</span><span>${trend}</span></div>
         <div class="line"><span>Trainings</span><span>${s.sessions}</span></div>
+        <div class="line"><span>Serie</span><span>${streak.current} ${streak.current === 1 ? 'Tag' : 'Tage'}</span></div>
+        <div class="line"><span>Längste Serie</span><span>${streak.best} ${streak.best === 1 ? 'Tag' : 'Tage'}</span></div>
       </section>
       <section class="card"><h2>Kalorien letzte 14 Tage</h2>${barChart(barRows(), g.kcal)}
         <p class="muted small">Gestrichelte Linie = Kalorienziel</p></section>`;
@@ -1045,6 +1110,14 @@
         <p class="hint">Gilt für Buttons, Ringe, Hervorhebungen und Diagramme. Die Wahl gilt für dieses Gerät.</p>
       </section>
       <section class="card">
+        <h2>Serie</h2>
+        <ul class="list"><li>
+          <div class="grow"><b>Serie anzeigen</b><small class="muted">Tage in Folge mit Einträgen im Tagebuch oder Training</small></div>
+          <label class="switch" aria-label="Serie anzeigen"><input type="checkbox" data-change="streak-on" ${settings().showStreak ? 'checked' : ''}><span></span></label>
+        </li></ul>
+        <p class="hint">Erinnerungen: Zeitgesteuerte Mitteilungen kann diese App auf dem iPhone ohne eigenen Server nicht senden. Lege dafür in der Erinnerungen-App eine tägliche Erinnerung an, zum Beispiel „Tagebuch eintragen“ um 20 Uhr.</p>
+      </section>
+      <section class="card">
         <h2>Mahlzeiten im Tagebuch</h2>
         <ul class="list">${mealConfig().map((m, i, all) => `<li>
           <label class="switch" aria-label="${esc(m.label)} anzeigen"><input type="checkbox" data-change="meal-on" data-i="${i}" ${m.on ? 'checked' : ''}><span></span></label>
@@ -1165,6 +1238,7 @@
     // Großer Titel wie in Apple-Apps. Beim Scrollen erscheint der kleine Titel oben.
     $('#view').innerHTML = `<h1 class="large-title">${esc(v.title)}</h1>${v.render()}`;
     updateSubbar();
+    maybeStreakToast();
   }
 
   // ---------- Overlays: Auswahl, Dialog, Editor, Meldungen ----------
@@ -2549,6 +2623,9 @@
       case 'draft-servings':
         syncDraft();
         return renderEditor();
+      case 'streak-on':
+        Store.set('settings', { ...Store.get('settings', {}), showStreak: el.checked });
+        return render();
       case 'meal-on':
       case 'meal-name': {
         const list = mealConfig();

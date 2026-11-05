@@ -192,6 +192,17 @@ button.linkish { background: none; color: var(--accent); font-weight: 500; paddi
 button.linkish.strong { font-weight: 600; }
 button.left { align-self: flex-start; padding-left: 0; }
 
+/* Serie */
+.streak {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 14px;
+  border-radius: var(--radius); background: var(--card);
+}
+.streak .flame { width: 28px; height: 28px; flex: 0 0 auto; fill: #ff9500; }
+.streak.idle .flame { fill: var(--muted); opacity: 0.5; }
+.streak b { font-variant-numeric: tabular-nums; }
+.streak.risk { background: color-mix(in srgb, #ff9500 14%, var(--card)); }
+.streak.risk small { color: var(--warn); }
+
 .datebar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .datebar button.icon { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; font-size: 1.4rem; background: var(--card); color: var(--accent); border-radius: 50%; }
 .datebar button.linkish { color: var(--text); font-size: 1.02rem; font-weight: 600; }
