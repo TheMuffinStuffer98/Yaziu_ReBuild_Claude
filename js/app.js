@@ -41,7 +41,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
-  const APP_VERSION = 'v13'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v14'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -98,7 +98,7 @@
     goal: 'bulk', pace: 300, waist: '', neck: '', hip: '', bodyFat: '',
     targetMode: 'auto', proteinPerKg: '', fatPct: '', leanBasis: false,
     manual: { kcal: '', p: '', f: '', c: '' },
-    showStreak: true,
+    showStreak: true, cardioBudget: 0,
   });
   const settings = () => {
     const s = Store.get('settings', {});
@@ -250,7 +250,17 @@
       weightRate: recent !== null && prev !== null ? recent - prev : null,
       weightKg: currentWeight(),
       proteinIdeas: proteinIdeas(3),
-      sessions: data.workouts().filter((w) => w.date >= dates[0] && w.date <= end).length,
+      // Krafttrainings und Cardio getrennt zählen
+      sessions: data.workouts().filter((w) => w.type !== 'cardio' && w.date >= dates[0] && w.date <= end).length,
+      cardio: (() => {
+        const list = data.workouts().filter((w) => w.type === 'cardio' && w.date >= dates[0] && w.date <= end);
+        return {
+          count: list.length,
+          minutes: list.reduce((t, w) => t + (w.minutes || 0), 0),
+          km: list.reduce((t, w) => t + (w.km || 0), 0),
+          kcal: list.reduce((t, w) => t + (w.kcal || 0), 0),
+        };
+      })(),
       goals: goals(),
       goal: settings().goal,
     };
@@ -372,6 +382,15 @@
     </section>`;
   }
 
+  // Zusätzliche Kalorien für diesen Tag aus Cardio, je nach Einstellung 0, 50 oder 100 % der aktiven Kalorien.
+  // Standard ist 0: Der Aktivitätsfaktor im Tagesziel deckt normales Training schon ab.
+  function cardioBonus(date) {
+    const factor = Number(settings().cardioBudget) || 0;
+    if (!factor) return 0;
+    const kcal = data.workouts().filter((w) => w.type === 'cardio' && w.date === date).reduce((t, w) => t + (w.kcal || 0), 0);
+    return Math.round(kcal * factor);
+  }
+
   // ---------- Serie: Tage in Folge mit Tagebuch-Einträgen oder Training ----------
 
   // Alle Tage bis heute, an denen etwas eingetragen wurde (Essen oder Training)
@@ -436,7 +455,10 @@
     const day = data.day(state.date);
     const g = goals();
     const t = sumEntries(day.entries);
-    const left = g.kcal - t.kcal;
+    // Optional: aktive Kalorien aus Cardio zählen zum Tagesziel (Standard aus)
+    const bonus = cardioBonus(state.date);
+    const goalKcal = g.kcal + bonus;
+    const left = goalKcal - t.kcal;
     return `
       ${isSetup() ? '' : `<section class="card note-card">
         <h2>Eckdaten fehlen</h2>
@@ -451,7 +473,7 @@
       </div>
       <section class="card hero">
         <div class="hero-ring">
-          ${ring(t.kcal, g.kcal)}
+          ${ring(t.kcal, goalKcal)}
           <div class="hero-center">
             <span class="big">${fmt(Math.abs(left))}</span>
             <span class="small">${left >= 0 ? 'kcal übrig' : 'kcal zu viel'}</span>
@@ -459,7 +481,8 @@
         </div>
         <div class="hero-side">
           <div class="muted small">Gegessen</div>
-          <div class="hero-num">${fmt(t.kcal)} <span class="muted small">/ ${fmt(g.kcal)} kcal</span></div>
+          <div class="hero-num">${fmt(t.kcal)} <span class="muted small">/ ${fmt(goalKcal)} kcal</span></div>
+          ${bonus ? `<div class="muted small">inkl. ${fmt(bonus)} kcal aus Cardio</div>` : ''}
           ${macroBar('Eiweiß', t.p, g.p, 'p')}
           ${macroBar('Fett', t.f, g.f, 'f')}
           ${macroBar('Kohlenh.', t.c, g.c, 'c')}
@@ -483,8 +506,9 @@
     if (state.tab === 'diary' && Store.activeId()) {
       const g = goals();
       const t = sumEntries(data.day(state.date).entries);
-      const left = g.kcal - t.kcal;
-      bar.textContent = `${fmt(t.kcal)} / ${fmt(g.kcal)} kcal · ${left >= 0 ? fmt(left) + ' übrig' : fmt(-left) + ' zu viel'} · E ${fmt(t.p)}/${fmt(g.p)}`;
+      const goalKcal = g.kcal + cardioBonus(state.date);
+      const left = goalKcal - t.kcal;
+      bar.textContent = `${fmt(t.kcal)} / ${fmt(goalKcal)} kcal · ${left >= 0 ? fmt(left) + ' übrig' : fmt(-left) + ' zu viel'} · E ${fmt(t.p)}/${fmt(g.p)}`;
     }
     bar.classList.toggle('show', state.tab === 'diary' && window.scrollY > 200);
   }
@@ -699,7 +723,34 @@
     </table></div>`;
   }
 
+  // Symbole für die Cardio-Aktivitäten (Linien-Stil wie in Apple Fitness)
+  const CARDIO_ICONS = {
+    bike: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="16.5" r="3.5"/><circle cx="18.5" cy="16.5" r="3.5"/><path d="M5.5 16.5 9 9h6l3.5 7.5M9 9l3 7.5M13 5.5h3"/></svg>',
+    run: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="15" cy="4.5" r="2"/><path d="M13 9l-3.5 2.5L11 14l-2 6M13 9l3 3 3 .5M11 14l3.5 2 1 4.5"/></svg>',
+    walk: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4.5" r="2"/><path d="M13 8.5V14M13 10.5l-3 3M13 10.5l3 3M13 14l-2.5 6.5M13 14l2.5 6.5"/></svg>',
+    swim: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="17" cy="6" r="2"/><path d="M4 12.5l6-2.5 3 3M3 17c2 0 2.5-1.5 4.5-1.5S10 17 12 17s2.5-1.5 4.5-1.5S19 17 21 17M3 21c2 0 2.5-1.5 4.5-1.5S10 21 12 21s2.5-1.5 4.5-1.5S19 21 21 21"/></svg>',
+  };
+
+  // Cardio-Einheit als Karte: Dauer, Strecke und aktive Kalorien als große Zahlen
+  function cardioCard(w) {
+    const label = (Calc.CARDIO[w.activity] || { label: w.title || 'Cardio' }).label;
+    const swim = w.activity === 'swim';
+    return `<section class="card tcard">
+      <div class="line">
+        <div class="cardio-head"><span class="act-icon">${CARDIO_ICONS[w.activity] || ''}</span>
+          <div><b>${esc(label)}</b><br><span class="muted small">${trainDateLabel(w.date)}</span></div></div>
+        <button class="linkish" data-action="t-edit" data-id="${w.id}">Ändern</button>
+      </div>
+      <div class="metrics">
+        <div><b>${fmt(w.minutes)}</b><small>min</small></div>
+        ${w.km ? `<div><b>${swim ? fmt(w.km * 1000) : fmt(w.km, 1)}</b><small>${swim ? 'm' : 'km'}</small></div>` : ''}
+        <div><b>${fmt(w.kcal)}</b><small>kcal</small></div>
+      </div>
+    </section>`;
+  }
+
   function workoutCard(w) {
+    if (w.type === 'cardio') return cardioCard(w);
     const volume = w.exercises.reduce((t, ex) => t + ex.sets.reduce((s, x) => s + x.w * x.r, 0), 0);
     return `<section class="card tcard">
       <div class="line">
@@ -731,7 +782,10 @@
     const olderCount = all.length - recent.length;
     const lifts = bestLifts();
     return `
-      <button class="primary wide" data-action="t-new">+ Training eintragen</button>
+      <div class="grid2 newrow">
+        <button class="primary" data-action="t-new">+ Kraft</button>
+        <button class="primary alt" data-action="c-new">+ Cardio</button>
+      </div>
       <h2 class="sub">Letzte 7 Tage</h2>
       ${recent.length ? recent.map(workoutCard).join('') : '<p class="muted small">Keine Trainings in den letzten 7 Tagen.</p>'}
       ${olderCount ? (state.show.trainOld
@@ -765,32 +819,151 @@
 
   // ---------- Training-Editor (Vollbild) ----------
 
+  function newStrengthDraft(date, plan) {
+    return {
+      type: 'strength', id: null, date, planId: plan ? plan.id : '', planName: plan ? plan.name : '', setCount: 3,
+      rows: plan && plan.exercises.length
+        ? plan.exercises.map((name) => ({ name, sets: ['', '', ''] }))
+        : [{ name: '', sets: ['', '', ''] }],
+    };
+  }
+
+  const newCardioDraft = (date) => ({
+    type: 'cardio', id: null, date, activity: 'run', minutes: '', dist: '', intensity: 'mid',
+  });
+
   function openTrainEditor(w, plan) {
     state.draft = null;
     state.pdraft = null;
-    if (w) {
+    if (w && w.type === 'cardio') {
+      const swim = w.activity === 'swim';
+      state.tdraft = {
+        type: 'cardio', id: w.id, date: w.date, activity: w.activity, minutes: String(w.minutes || ''),
+        dist: w.km ? String(swim ? Math.round(w.km * 1000) : w.km) : '', intensity: w.intensity || 'mid',
+      };
+    } else if (w) {
       const cols = maxSets(w);
       state.tdraft = {
-        id: w.id, date: w.date, planId: w.planId || '', planName: w.title || '', setCount: cols,
+        type: 'strength', id: w.id, date: w.date, planId: w.planId || '', planName: w.title || '', setCount: cols,
         rows: w.exercises.map((ex) => ({
           name: ex.name, sets: Array.from({ length: cols }, (_, i) => (ex.sets[i] ? setCell(ex.sets[i]) : '')),
         })),
       };
     } else {
-      state.tdraft = {
-        id: null, date: todayStr(), planId: plan ? plan.id : '', planName: plan ? plan.name : '', setCount: 3,
-        rows: plan && plan.exercises.length
-          ? plan.exercises.map((name) => ({ name, sets: ['', '', ''] }))
-          : [{ name: '', sets: ['', '', ''] }],
-      };
+      state.tdraft = newStrengthDraft(todayStr(), plan);
     }
     renderEditor();
+  }
+
+  // Umschalter Kraft/Cardio oben im Editor (nur beim Neuanlegen)
+  const typeSeg = (current) => `<div class="seg">
+    <button class="${current === 'strength' ? 'on' : ''}" data-action="t-type" data-v="strength">Kraft</button>
+    <button class="${current === 'cardio' ? 'on' : ''}" data-action="t-type" data-v="cardio">Cardio</button>
+  </div>`;
+
+  // ---------- Cardio-Editor ----------
+
+  function syncCDraft() {
+    const d = state.tdraft;
+    if (!d || d.type !== 'cardio') return;
+    if ($('#c-date') && $('#c-date').value) d.date = $('#c-date').value;
+    if ($('#c-min')) d.minutes = $('#c-min').value;
+    if ($('#c-km')) d.dist = $('#c-km').value;
+  }
+
+  // Schätzung aus den aktuellen Feldern
+  function cardioFromDraft() {
+    syncCDraft();
+    const d = state.tdraft;
+    const minutes = n(d.minutes);
+    const dist = n(d.dist);
+    const km = d.activity === 'swim' ? dist / 1000 : dist;
+    return { minutes, km, est: Calc.cardio(d.activity, minutes, km, d.intensity, currentWeight()) };
+  }
+
+  function updateCardioPreview() {
+    if (!$('#c-kcal')) return;
+    const { minutes, est } = cardioFromDraft();
+    $('#c-kcal').textContent = minutes > 0 ? `${fmt(est.kcal)} kcal` : '–';
+    $('#c-detail').textContent = minutes > 0
+      ? `MET ${fmt(est.met, 1)}${est.speed ? ` · Ø ${fmt(est.speed, 1)} km/h` : ''} · bei ${fmt(currentWeight(), 1)} kg`
+      : 'Trage die Dauer ein.';
+    $('#c-hint').textContent = est.bySpeed
+      ? 'Die Intensität wird aus Strecke und Dauer berechnet.'
+      : 'Ohne Strecke zählt die gewählte Intensität.';
+    $('#c-int').classList.toggle('dim', est.bySpeed);
+  }
+
+  function renderCardioEditor(host) {
+    const d = state.tdraft;
+    const keep = host.querySelector('.page-body') ? host.querySelector('.page-body').scrollTop : 0;
+    const swim = d.activity === 'swim';
+    const levels = [['low', 'Locker'], ['mid', 'Mittel'], ['high', 'Intensiv']];
+    host.innerHTML = `
+      <div class="page-head">
+        <button class="linkish" data-action="train-close">Abbrechen</button>
+        <b>${d.id ? 'Cardio ändern' : 'Cardio eintragen'}</b>
+        <button class="linkish strong" data-action="train-save">Speichern</button>
+      </div>
+      <div class="page-body">
+        ${d.id ? '' : typeSeg('cardio')}
+        <section class="card">${field('Datum', `<input id="c-date" type="date" value="${d.date}">`)}</section>
+        <section class="card">
+          <h2>Aktivität</h2>
+          <div class="tiles">${Object.entries(Calc.CARDIO).map(([k, a]) => `<button class="tile ${k === d.activity ? 'on' : ''}" data-action="c-act" data-v="${k}">
+            <span class="act-icon">${CARDIO_ICONS[k]}</span><span>${a.label}</span></button>`).join('')}</div>
+        </section>
+        <section class="card">
+          <div class="grid2">
+            ${field('Dauer (Minuten)', `<input id="c-min" type="number" inputmode="numeric" min="1" step="1" value="${esc(d.minutes)}" placeholder="45" data-input="cardio">`)}
+            ${field(swim ? 'Strecke (m), optional' : 'Strecke (km), optional', `<input id="c-km" type="number" inputmode="decimal" min="0" step="any" value="${esc(d.dist)}" placeholder="${swim ? '1000' : '8,5'}" data-input="cardio">`)}
+          </div>
+          <div class="chips">${[20, 30, 45, 60, 90].map((m) => `<button type="button" class="chip" data-action="c-min-set" data-v="${m}">${m} min</button>`).join('')}</div>
+          <h2 class="sub">Intensität</h2>
+          <div class="seg" id="c-int">${levels.map(([v, l]) => `<button class="${d.intensity === v ? 'on' : ''}" data-action="c-int" data-v="${v}">${l}</button>`).join('')}</div>
+          <p class="hint" id="c-hint"></p>
+        </section>
+        <section class="card result">
+          <div class="muted small">Geschätzter Verbrauch (aktive Kalorien)</div>
+          <div class="big" id="c-kcal">–</div>
+          <div class="muted small" id="c-detail"></div>
+        </section>
+        ${d.id ? '<button class="ghost danger-btn" data-action="t-delete">Cardio löschen</button>' : ''}
+      </div>`;
+    host.hidden = false;
+    host.querySelector('.page-body').scrollTop = keep;
+    updateCardioPreview();
+  }
+
+  function saveCardio() {
+    const d = state.tdraft;
+    const { minutes, km, est } = cardioFromDraft();
+    if (!d.date) return toast('Bitte ein Datum wählen.');
+    if (!(minutes > 0)) return toast('Bitte die Dauer in Minuten eintragen.');
+    const workout = {
+      id: d.id || 'w' + uid(), date: d.date, type: 'cardio', activity: d.activity,
+      title: Calc.CARDIO[d.activity].label, minutes, km: km > 0 ? km : null, intensity: d.intensity,
+      met: Math.round(est.met * 10) / 10, kcal: Math.round(est.kcal), planId: '', exercises: [],
+    };
+    const list = data.workouts();
+    const idx = list.findIndex((x) => x.id === workout.id);
+    if (idx >= 0) list[idx] = workout;
+    else list.push(workout);
+    Store.set('workouts', list);
+    state.tdraft = null;
+    renderEditor();
+    toast('Cardio gespeichert.');
+    render();
   }
 
   // Liest die Felder des Editors in den Entwurf
   function syncTDraft() {
     const d = state.tdraft;
     if (!d) return;
+    if (d.type === 'cardio') {
+      syncCDraft();
+      return;
+    }
     const dt = $('#t-date');
     if (dt && dt.value) d.date = dt.value;
     d.rows = [...document.querySelectorAll('#editor [data-trow]')].map((tr) => ({
@@ -801,6 +974,7 @@
 
   function renderTrainEditor(host) {
     const d = state.tdraft;
+    if (d.type === 'cardio') return renderCardioEditor(host);
     const keep = host.querySelector('.page-body') ? host.querySelector('.page-body').scrollTop : 0;
     const plans = data.plans();
     const rows = d.rows.map((r, i) => {
@@ -819,6 +993,7 @@
         <button class="linkish strong" data-action="train-save">Speichern</button>
       </div>
       <div class="page-body">
+        ${d.id ? '' : typeSeg('strength')}
         <section class="card">
           <div class="grid2">
             ${field('Datum', `<input id="t-date" type="date" value="${d.date}">`)}
@@ -849,6 +1024,7 @@
   }
 
   function saveTraining() {
+    if (state.tdraft.type === 'cardio') return saveCardio();
     syncTDraft();
     const d = state.tdraft;
     if (!d.date) return toast('Bitte ein Datum wählen.');
@@ -869,7 +1045,7 @@
     if (!exercises.length) return toast('Trage mindestens eine Übung mit einem Satz ein.');
     const plan = data.plans().find((p) => p.id === d.planId);
     const workout = {
-      id: d.id || 'w' + uid(), date: d.date, title: plan ? plan.name : d.planName, planId: d.planId || '', exercises,
+      id: d.id || 'w' + uid(), date: d.date, type: 'strength', title: plan ? plan.name : d.planName, planId: d.planId || '', exercises,
     };
     const list = data.workouts();
     const idx = list.findIndex((x) => x.id === workout.id);
@@ -975,7 +1151,10 @@
     ? row('Wasser', s.avg.water, g.water, 'ml')
     : '<div class="line"><span>Wasser</span><span class="muted">nichts eingetragen</span></div>'}
         <div class="line"><span>Gewichtstrend</span><span>${trend}</span></div>
-        <div class="line"><span>Trainings</span><span>${s.sessions}</span></div>
+        <div class="line"><span>Krafttrainings</span><span>${s.sessions}</span></div>
+        <div class="line"><span>Cardio</span><span>${s.cardio.count
+    ? `${s.cardio.count}× · ${fmt(s.cardio.minutes)} min${s.cardio.km ? ` · ${fmt(s.cardio.km, 1)} km` : ''} · ${fmt(s.cardio.kcal)} kcal`
+    : '<span class="muted">nichts eingetragen</span>'}</span></div>
         <div class="line"><span>Serie</span><span>${streak.current} ${streak.current === 1 ? 'Tag' : 'Tage'}</span></div>
         <div class="line"><span>Längste Serie</span><span>${streak.best} ${streak.best === 1 ? 'Tag' : 'Tage'}</span></div>
       </section>
@@ -1043,6 +1222,11 @@
     const auto = s.targetMode !== 'manual';
     return `
       ${targetPreview()}
+      <section class="card">
+        <h2>Cardio im Kalorienziel</h2>
+        <div class="seg">${[[0, 'Aus'], [0.5, '50 %'], [1, '100 %']].map(([v, l]) => `<button class="${Number(s.cardioBudget || 0) === v ? 'on' : ''}" data-action="cardio-budget" data-v="${v}">${l}</button>`).join('')}</div>
+        <p class="hint">Standard ist „Aus“: Der Aktivitätsfaktor in deinem Tagesziel deckt normales Training schon ab, sonst würde es doppelt gezählt. Mit 50 % oder 100 % kommen die geschätzten aktiven Kalorien eines Cardio-Tages zum Tagesziel dazu. Bei 50 % bleibt ein Puffer für Schätzfehler. Krafttraining zählt nie mit, weil sich sein Verbrauch kaum verlässlich schätzen lässt.</p>
+      </section>
       <form data-form="goals" class="stack">
         <section class="card">
           <h2>Körperdaten</h2>
@@ -2173,6 +2357,9 @@
       case 'theme-mode':
         themeSave({ mode: ds.v });
         return render();
+      case 'cardio-budget':
+        Store.set('settings', { ...Store.get('settings', {}), cardioBudget: Number(ds.v) });
+        return render();
 
       // Mahlzeiten konfigurieren
       case 'meal-up':
@@ -2215,6 +2402,31 @@
       // Training
       case 't-new':
         return openTrainEditor(null, null);
+      case 'c-new':
+        openTrainEditor(null, null);
+        state.tdraft = newCardioDraft(todayStr());
+        return renderEditor();
+      case 't-type': {
+        syncTDraft();
+        const date = state.tdraft.date;
+        state.tdraft = ds.v === 'cardio' ? newCardioDraft(date) : newStrengthDraft(date, null);
+        return renderEditor();
+      }
+      case 'c-act': {
+        syncCDraft();
+        const d = state.tdraft;
+        // Schwimmen rechnet in Metern, alles andere in Kilometern. Beim Wechsel die Strecke leeren.
+        if ((ds.v === 'swim') !== (d.activity === 'swim')) d.dist = '';
+        d.activity = ds.v;
+        return renderEditor();
+      }
+      case 'c-int':
+        syncCDraft();
+        state.tdraft.intensity = ds.v;
+        return renderEditor();
+      case 'c-min-set':
+        $('#c-min').value = ds.v;
+        return updateCardioPreview();
       case 't-edit': {
         const w = data.workouts().find((x) => x.id === ds.id);
         return w ? openTrainEditor(w, null) : undefined;
@@ -2688,6 +2900,7 @@
       refreshList(el.dataset.scope);
     }
     if (el.dataset.input === 'amount') renderAmountPreview();
+    if (el.dataset.input === 'cardio') updateCardioPreview();
     if (el.dataset.input === 'tq') {
       state.show.trainQ = el.value;
       state.show.trainLimit = 20;

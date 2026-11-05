@@ -71,8 +71,9 @@ const Coach = (() => {
       out.push({ level: 'info', text: `Wasser Ø ${Math.round(s.avg.water)} ml an Tagen mit Eintrag, Ziel ${g.water} ml.` });
     }
 
-    if (s.sessions < 2) {
-      out.push({ level: 'info', text: `${s.sessions} Training(s) in 7 Tagen. Für Kraftaufbau sind meist 3 bis 5 Einheiten pro Woche üblich.` });
+    const units = s.sessions + ((s.cardio && s.cardio.count) || 0);
+    if (units < 2) {
+      out.push({ level: 'info', text: `${units} Einheit(en) in 7 Tagen (Kraft und Cardio). Üblich sind meist 3 bis 5 Einheiten pro Woche.` });
     }
 
     const trend = weightVerdict(s.weightRate, s.goal, s.weightKg);

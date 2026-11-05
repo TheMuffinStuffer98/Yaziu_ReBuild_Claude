@@ -19,6 +19,7 @@ Die App hat vier Reiter: **Tagebuch**, **Kochbuch**, **Fortschritt** und **Profi
 - **Foto-Schätzung (optional):** Kalorien aus einem Foto schätzen, mit einem eigenen kostenlosen Google-Schlüssel (siehe Datenschutz). Entweder pro Zutat oder als ganzes Gericht, z. B. im Restaurant. Google schaltet Modelle ab; die App sucht dann selbst ein verfügbares Modell. Unter Profil → Foto gibt es einen Verbindungstest.
 - **Fortschritt:** Umschalter für Gewicht, Training, Pläne, Auswertung und Coach
 - **Training:** Trainingstage als Tabelle (Datum, Plan, Übungen mit bis zu 3 Sätzen, bei Bedarf mehr). Nachträglich änderbar. Die letzten 7 Tage stehen oben, ältere Trainings blendest du auf Klick ein und kannst sie durchsuchen. Beim Eintragen siehst du grau, was du beim letzten Mal gemacht hast.
+- **Cardio:** Radfahren, Laufen, Spazieren und Schwimmen mit Dauer, optionaler Strecke und Intensität. Die App schätzt die aktiven Kalorien (Compendium of Physical Activities 2024) und berechnet bei Strecke das Tempo. Optional kannst du Cardio-Kalorien zum Tagesziel zählen (Profil → Ziele, Standard aus). Krafttraining fließt nie in die Kalorien ein.
 - **Pläne:** Vorlagen für Trainingstage mit Übungen in fester Reihenfolge. Ein Training startest du direkt aus dem Plan.
 - **Gewicht und Auswertung:** Verlauf, Ø 7 Tage, Kalorien und Makros der letzten 7 Tage (Ø nur über Tage mit Einträgen, auch beim Wasser)
 - **Profil:** Ziele, Anzeige (Modus, Akzentfarbe, Mahlzeiten), Daten und Foto-Schlüssel

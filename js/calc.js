@@ -72,6 +72,64 @@ const Calc = (() => {
     return { mode: 'auto', kcal: Math.round(kcal), p, f, c, perKg, lean, fatPct, overBudget: p * 4 + f * 9 > kcal };
   }
 
+  // Cardio: Verbrauch nach dem Compendium of Physical Activities (2024), pacompendium.com.
+  // MET = Vielfaches des Ruheumsatzes. Angezeigt werden die aktiven Kalorien: (MET − 1) × kg × Stunden,
+  // also ohne den Grundumsatz, der ohnehin anfällt (wie „aktive Energie“ in Apple Health).
+  // levels: Locker / Mittel / Intensiv, wenn keine Strecke bekannt ist.
+  // Mit Strecke und Dauer wird das Tempo berechnet und der passende MET-Wert genommen.
+  //   curve: Punkte [km/h, MET], dazwischen wird linear gerechnet. bands: Stufen [Obergrenze km/h, MET].
+  const CARDIO = {
+    bike: {
+      label: 'Radfahren',
+      levels: { low: 4.3, mid: 7.0, high: 9.0 }, // 01015, 01016, 01017: selbst gewähltes Tempo
+      bands: [[16, 4.0], [19.3, 6.8], [22.5, 8.0], [25.7, 10.0], [32, 12.0], [Infinity, 16.8]], // 01010 bis 01060
+    },
+    run: {
+      label: 'Laufen',
+      levels: { low: 7.5, mid: 10.5, high: 12.5 }, // 12020 Jogging, 12145 Laufen, 12100 (7 min/Meile)
+      curve: [ // 12028 bis 12135
+        [6.4, 6.5], [7.3, 7.8], [8.2, 8.5], [9.0, 9.0], [9.9, 9.3], [10.8, 10.5], [11.3, 11.0], [12.1, 11.8],
+        [12.9, 12.0], [13.8, 12.5], [14.5, 13.0], [16.1, 14.8], [17.7, 16.8], [19.3, 18.5], [20.9, 19.8], [22.5, 23.0],
+      ],
+    },
+    walk: {
+      label: 'Spazieren',
+      levels: { low: 2.8, mid: 3.5, high: 4.8 }, // 17152 langsam, 17160 zum Vergnügen, 17200 zügig
+      curve: [ // 17151 bis 17231
+        [3.0, 2.3], [3.6, 2.8], [4.0, 3.0], [5.0, 3.8], [5.9, 4.8], [6.8, 5.5], [7.6, 7.0], [8.5, 8.5],
+      ],
+    },
+    swim: {
+      label: 'Schwimmen',
+      levels: { low: 5.8, mid: 8.0, high: 9.8 }, // 18240 locker, 18290 mittel, 18230 schnell
+    },
+  };
+
+  // MET-Wert zu einem Tempo in km/h, oder null (Schwimmen kennt kein Tempo-Modell)
+  function speedMet(activity, kmh) {
+    const def = CARDIO[activity];
+    if (!def || !(kmh > 0)) return null;
+    if (def.bands) return def.bands.find(([limit]) => kmh < limit)[1];
+    if (!def.curve) return null;
+    const c = def.curve;
+    if (kmh <= c[0][0]) return c[0][1];
+    if (kmh >= c[c.length - 1][0]) return c[c.length - 1][1];
+    const i = c.findIndex(([v]) => v >= kmh);
+    const [x0, y0] = c[i - 1];
+    const [x1, y1] = c[i];
+    return y0 + ((y1 - y0) * (kmh - x0)) / (x1 - x0);
+  }
+
+  // Schätzt eine Cardio-Einheit. minutes > 0 ist Pflicht, km und intensity sind optional.
+  function cardio(activity, minutes, km, intensity, kg) {
+    const def = CARDIO[activity] || CARDIO.walk;
+    const hours = minutes / 60;
+    const speed = km > 0 && minutes > 0 ? km / hours : null;
+    const bySpeed = speed ? speedMet(activity, speed) : null;
+    const met = bySpeed || def.levels[intensity] || def.levels.mid;
+    return { met, speed, bySpeed: !!bySpeed, kcal: Math.max(0, (met - 1) * kg * hours) };
+  }
+
   // Epley-Formel: geschätztes Maximalgewicht für eine Wiederholung
   const e1rm = (kg, reps) => kg * (1 + reps / 30);
 
@@ -90,6 +148,6 @@ const Calc = (() => {
   }
 
   return {
-    bmr, tdee, goalKcal, bodyFat, targets, e1rm, entryTotals, sumEntries, PROTEIN, LEAN, FAT,
+    bmr, tdee, goalKcal, bodyFat, targets, e1rm, entryTotals, sumEntries, PROTEIN, LEAN, FAT, CARDIO, speedMet, cardio,
   };
 })();
