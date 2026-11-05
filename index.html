@@ -27,6 +27,7 @@
 <body>
   <header class="topbar">
     <div class="topline">
+      <span></span>
       <span id="title">Tagebuch</span>
       <span id="profile-badge" class="muted"></span>
     </div>
@@ -36,10 +37,22 @@
   <main id="view"></main>
 
   <nav class="tabbar" id="tabs" aria-label="Hauptmenü">
-    <button data-tab="diary">Tagebuch</button>
-    <button data-tab="cook">Kochbuch</button>
-    <button data-tab="progress">Fortschritt</button>
-    <button data-tab="profile">Profil</button>
+    <button data-tab="diary">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5v-15z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H19v-5"/><path d="M8.5 7.5h6"/></svg>
+      <span>Tagebuch</span>
+    </button>
+    <button data-tab="cook">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v7a2.5 2.5 0 0 0 5 0V3"/><path d="M9.5 3v18"/><path d="M17.5 21V3c-2.3 1.2-3.5 3.7-3.5 6.5 0 2 1 3.5 3.5 3.5"/></svg>
+      <span>Kochbuch</span>
+    </button>
+    <button data-tab="progress">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 17.5 9 11.5l4 3.5 7.5-9"/><path d="M15 6h5.5v5.5"/><path d="M3.5 21h17"/></svg>
+      <span>Fortschritt</span>
+    </button>
+    <button data-tab="profile">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 21c.6-4 3.8-6 7.5-6s6.9 2 7.5 6"/></svg>
+      <span>Profil</span>
+    </button>
   </nav>
 
   <div id="editor" class="page" hidden></div>

@@ -12,18 +12,18 @@ Die Planung, Entscheidungen und der Fortschritt stehen in [PROJEKT_STATUS.md](PR
 
 Die App hat vier Reiter: **Tagebuch**, **Kochbuch**, **Fortschritt** und **Profil**.
 
-- **Tagebuch:** Mahlzeiten als Liste. Du wählst das Lebensmittel (Bestand, von Hand oder per Barcode), die Nährwerte kommen automatisch, du gibst nur die Menge an. Dazu Gerichte, Foto-Schätzung, „Von gestern übernehmen“, Rückgängig und Wasser.
-- **Kochbuch:** Lebensmittel und Gerichte mit Suche, Favoriten und „Zuletzt benutzt“. Eigene Lebensmittel und Gerichte anlegen und ändern. Vorinstalliert ist nur Frisches ohne Barcode: Eier, Obst, Gemüse, rohes Fleisch und roher Fisch sowie Wasser, Kaffee und Tee. Die Werte stammen aus der USDA-Datenbank (SR Legacy, Rohwerte). Deutsche Tabellen und Packungen liegen etwa bei Geflügel oft etwas niedriger, Fettgehalt und Zuschnitt schwanken. Alles andere legst du selbst an, per Barcode-Scan oder von Hand, weil sich Marken in den Werten unterscheiden.
+- **Tagebuch:** Mahlzeiten als Liste. Du wählst das Lebensmittel (Bestand, von Hand oder per Barcode), die Nährwerte kommen automatisch, du gibst nur die Menge an. Mengen gehen in Gramm oder Stück (bei Produkten mit Gewicht pro Stück rechnet die App um). Dazu Gerichte, Foto-Schätzung, „Von gestern übernehmen“, Rückgängig und Wasser. Welche Mahlzeiten das Tagebuch zeigt (Frühstück, Pre-Workout, Post-Workout, eigene …), stellst du unter Profil → Anzeige ein.
+- **Kochbuch:** Lebensmittel und Gerichte. Die Liste bleibt zu, bis du suchst oder einen Filter (Zuletzt, Favoriten, Alle, Eigene) wählst. Eigene Lebensmittel und Gerichte anlegen und ändern. Vorinstalliert ist nur Frisches ohne Barcode: Eier, Obst, Gemüse, rohes Fleisch und roher Fisch sowie Wasser, Kaffee und Tee. Die Werte stammen aus der USDA-Datenbank (SR Legacy, Rohwerte). Deutsche Tabellen und Packungen liegen etwa bei Geflügel oft etwas niedriger, Fettgehalt und Zuschnitt schwanken. Alles andere legst du selbst an, per Barcode-Scan oder von Hand, weil sich Marken in den Werten unterscheiden.
 - **Gerichte:** Rezept mit Zutaten und Portionszahl eingeben, die App rechnet auf eine Portion herunter und zeigt, was pro Portion auf den Teller kommt. Mahlzeiten aus dem Tagebuch lassen sich mit einem Namen als Gericht speichern.
 - **Barcode-Scanner:** Verpackte Produkte per Kamera scannen. Die Daten kommen von Open Food Facts und werden danach lokal gespeichert.
-- **Foto-Schätzung (optional):** Kalorien aus einem Foto schätzen, mit einem eigenen kostenlosen Google-Schlüssel (siehe Datenschutz). Entweder pro Zutat oder als ganzes Gericht, z. B. im Restaurant.
+- **Foto-Schätzung (optional):** Kalorien aus einem Foto schätzen, mit einem eigenen kostenlosen Google-Schlüssel (siehe Datenschutz). Entweder pro Zutat oder als ganzes Gericht, z. B. im Restaurant. Google schaltet Modelle ab; die App sucht dann selbst ein verfügbares Modell. Unter Profil → Foto gibt es einen Verbindungstest.
 - **Fortschritt:** Umschalter für Gewicht, Training, Pläne, Auswertung und Coach
 - **Training:** Trainingstage als Tabelle (Datum, Plan, Übungen mit bis zu 3 Sätzen, bei Bedarf mehr). Nachträglich änderbar. Die letzten 7 Tage stehen oben, ältere Trainings blendest du auf Klick ein und kannst sie durchsuchen. Beim Eintragen siehst du grau, was du beim letzten Mal gemacht hast.
 - **Pläne:** Vorlagen für Trainingstage mit Übungen in fester Reihenfolge. Ein Training startest du direkt aus dem Plan.
 - **Gewicht und Auswertung:** Verlauf, Ø 7 Tage, Kalorien und Makros der letzten 7 Tage (Ø nur über Tage mit Einträgen, auch beim Wasser)
-- **Profil:** Ziele, Darstellung, Daten und Foto-Schlüssel
+- **Profil:** Ziele, Anzeige (Modus, Akzentfarbe, Mahlzeiten), Daten und Foto-Schlüssel
 - **Ziele:** Automatisch aus Ziel und Körperdaten, mit anpassbarem Eiweiß (g/kg) und Fettanteil, oder komplett selbst vorgegeben. Eiweiß optional auf die Magermasse bezogen (beim Abnehmen).
-- **Darstellung:** Hell, Dunkel oder wie das iPhone, dazu eine wählbare Akzentfarbe
+- **Anzeige:** Aufbau und Aussehen orientieren sich an iPhone-Apps (große Titel, Tab-Leiste mit Symbolen, gruppierte Flächen). Hell, Dunkel oder wie das iPhone, dazu eine wählbare Akzentfarbe
 - **Profile:** Mehrere Personen auf einem Gerät, jede mit eigenen Daten
 - **Backup:** Export und Import als JSON-Datei
 - **Offline:** Nach dem ersten Laden funktioniert die App ohne Netz

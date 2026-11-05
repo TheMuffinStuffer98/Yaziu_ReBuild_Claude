@@ -25,8 +25,13 @@
     ? 'Heute'
     : new Date(str + 'T12:00:00').toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' }));
 
-  const MEALS = [['fruehstueck', 'Frühstück'], ['mittag', 'Mittagessen'], ['abend', 'Abendessen'], ['snack', 'Snacks']];
-  const mealLabel = (k) => (MEALS.find((m) => m[0] === k) || [k, k])[1];
+  // Mahlzeiten-Katalog: [Schlüssel, Name, standardmäßig an]. Die Schlüssel der ersten vier bleiben gleich,
+  // damit bestehende Einträge zugeordnet bleiben.
+  const MEAL_CATALOG = [
+    ['fruehstueck', 'Frühstück', true], ['vormittag', 'Vormittagssnack', false], ['mittag', 'Mittagessen', true],
+    ['nachmittag', 'Nachmittagssnack', false], ['preworkout', 'Pre-Workout', false], ['postworkout', 'Post-Workout', false],
+    ['abend', 'Abendessen', true], ['snack', 'Snacks', true], ['spaet', 'Spätmahlzeit', false],
+  ];
   const ACTIVITY = [
     [1.2, 'Kaum Bewegung (Bürojob)'],
     [1.375, 'Leicht aktiv (1–3 Einheiten/Woche)'],
@@ -35,8 +40,8 @@
     [1.9, 'Extrem (Training plus körperliche Arbeit)'],
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
-  const DEFAULT_MODEL = 'gemini-2.5-flash';
-  const APP_VERSION = 'v11'; // gleich wie CACHE in sw.js
+  const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
+  const APP_VERSION = 'v12'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -104,6 +109,27 @@
     return !!(s.setupDone || s.age !== undefined);
   };
 
+  // Mahlzeiten des Profils: Liste aus {key, label, on}. Gespeichert in den Einstellungen.
+  function mealConfig() {
+    const base = MEAL_CATALOG.map(([key, label, on]) => ({ key, label, on }));
+    const stored = Store.get('settings', {}).meals;
+    if (!Array.isArray(stored)) return base;
+    const out = stored.filter((m) => m && m.key && m.label).map((m) => ({ key: m.key, label: m.label, on: !!m.on }));
+    base.forEach((b) => { if (!out.some((o) => o.key === b.key)) out.push({ ...b, on: false }); });
+    return out;
+  }
+  const saveMealConfig = (list) => Store.set('settings', { ...Store.get('settings', {}), meals: list });
+  const mealLabel = (k) => (mealConfig().find((m) => m.key === k) || { label: k }).label;
+  // Eingeschaltete Mahlzeiten plus ausgeschaltete, die an diesem Tag Einträge haben (damit nichts verschwindet)
+  function mealsForDay(entries) {
+    const cfg = mealConfig();
+    const shown = cfg.filter((m) => m.on || entries.some((e) => e.meal === m.key));
+    const orphans = [...new Set(entries.map((e) => e.meal))].filter((k) => !cfg.some((m) => m.key === k));
+    return [...shown, ...orphans.map((key) => ({ key, label: key, on: false }))];
+  }
+  // Gibt es in irgendeinem Tag noch Einträge in dieser Mahlzeit? Dann darf sie nicht gelöscht werden.
+  const mealHasEntries = (key) => Object.values(data.days()).some((d) => d.entries.some((e) => e.meal === key));
+
   const data = {
     days: () => Store.get('days', {}),
     day: (date) => data.days()[date] || { entries: [], water: 0 },
@@ -133,8 +159,13 @@
   }
 
   const allFoods = () => Foods.list([...data.custom(), ...data.products()]);
-  const foodItem = (food, grams) => ({
-    name: food.name, grams, foodId: food.id, base: { kcal: food.kcal, p: food.p, f: food.f, c: food.c },
+  // pieces = Anzahl Stück, falls die Menge in Stück angegeben wurde (grams ist dann schon umgerechnet)
+  const foodItem = (food, grams, pieces) => ({
+    name: food.name,
+    grams,
+    foodId: food.id,
+    base: { kcal: food.kcal, p: food.p, f: food.f, c: food.c },
+    ...(pieces ? { pieces, pieceG: food.piece } : {}),
   });
 
   function saveProduct(p) {
@@ -307,8 +338,18 @@
       <input class="grams" type="number" step="any" inputmode="decimal" value="${e.grams}" data-change="grams" data-id="${e.id}" aria-label="Menge">
       <span class="unit">${unitLabel(e)}</span>
       <button class="icon danger" data-action="del-entry" data-id="${e.id}" aria-label="Eintrag löschen">×</button>
-      <div class="entry-info"><small class="muted">${macroLine(t)}</small>${plateLine(e)}</div>
+      <div class="entry-info"><small class="muted">${e.pieces ? `${fmt(e.pieces, 1)} Stück · ` : ''}${macroLine(t)}</small>${plateLine(e)}</div>
     </li>`;
+  }
+
+  // Ist diese Mahlzeit schon ein gespeichertes Gericht? Dann braucht sie kein „Als Gericht speichern“:
+  // entweder besteht sie nur aus einem Gericht, oder es gibt ein Gericht mit denselben Zutaten (Mengen egal).
+  function mealIsDish(list) {
+    if (!list.length) return false;
+    if (list.length === 1 && list[0].dishId) return true;
+    const key = (xs) => xs.map((x) => x.name.trim().toLowerCase()).sort().join('|');
+    const k = key(list);
+    return data.dishes().some((d) => key(d.ingredients) === k);
   }
 
   function mealCard(key, label, entries) {
@@ -324,7 +365,7 @@
         <button class="add" data-action="photo-open" data-meal="${key}">Foto</button>
       </div>
       <div class="minor">
-        ${list.length ? `<button class="linkish" data-action="meal-save" data-meal="${key}">Als Gericht speichern</button>` : ''}
+        ${list.length && !mealIsDish(list) ? `<button class="linkish" data-action="meal-save" data-meal="${key}">Als Gericht speichern</button>` : ''}
         ${!list.length && yesterday.length ? `<button class="linkish" data-action="meal-copy" data-meal="${key}">Von gestern übernehmen</button>` : ''}
       </div>
     </section>`;
@@ -362,7 +403,7 @@
           ${macroBar('Kohlenh.', t.c, g.c, 'c')}
         </div>
       </section>
-      ${MEALS.map(([k, l]) => mealCard(k, l, day.entries)).join('')}
+      ${mealsForDay(day.entries).map((m) => mealCard(m.key, m.label, day.entries)).join('')}
       <section class="card">
         <div class="line"><h2>Wasser</h2><span class="muted">${fmt(day.water)} / ${fmt(g.water)} ml</span></div>
         <div class="row">
@@ -374,6 +415,7 @@
   }
 
   function updateSubbar() {
+    document.body.classList.toggle('scrolled', window.scrollY > 44);
     const bar = $('#subbar');
     if (!bar) return;
     if (state.tab === 'diary' && Store.activeId()) {
@@ -389,12 +431,13 @@
 
   const newLs = (kind) => ({ q: '', filter: recentIds(kind).length ? 'recent' : 'all', limit: 30 });
 
-  // Das Kochbuch zeigt standardmäßig alles. Nur die Auswahl im Tagebuch startet mit „Zuletzt“.
+  // Das Kochbuch startet ohne Liste. Erst eine Suche oder ein Filter blendet Einträge ein.
+  // Nur die Auswahl im Tagebuch startet mit „Zuletzt“.
   function cookLs(sub) {
     if (!state.cook) {
       state.cook = {
-        foods: { q: '', filter: 'all', limit: 30 },
-        dishes: { q: '', filter: 'all', limit: 30 },
+        foods: { q: '', filter: '', limit: 30 },
+        dishes: { q: '', filter: '', limit: 30 },
       };
     }
     return state.cook[sub];
@@ -417,7 +460,11 @@
     const q = ls.q.trim().toLowerCase();
     const all = kind === 'food' ? allFoods() : data.dishes();
     const byName = (a, b) => a.name.localeCompare(b.name, 'de');
-    if (q) return all.filter((x) => `${x.name} ${x.alias || ''}`.toLowerCase().includes(q)).sort(byName);
+    // Name: irgendwo enthalten. Suchbegriffe (alias): nur als Wortanfang, damit "ei" nicht "heidelbeeren" findet.
+    if (q) {
+      return all.filter((x) => x.name.toLowerCase().includes(q)
+        || (x.alias || '').split(' ').some((a) => a.startsWith(q))).sort(byName);
+    }
     if (ls.filter === 'recent') {
       return recentIds(kind).map((id) => all.find((x) => x.id === id)).filter(Boolean);
     }
@@ -444,6 +491,13 @@
   }
 
   function listHtml(kind, ls, scope) {
+    // Ohne Suche und ohne Filter bleibt die Liste zu. Das vermeidet langes Scrollen.
+    if (!ls.q.trim() && !ls.filter) {
+      const total = (kind === 'food' ? allFoods() : data.dishes()).length;
+      const noun = kind === 'food' ? 'Lebensmittel' : (total === 1 ? 'Gericht' : 'Gerichte');
+      return `<p class="muted small empty">${total} ${noun} gespeichert. Suche oben oder wähle einen Filter.</p>
+        ${total ? `<button class="ghost" data-action="filter" data-scope="${scope}" data-v="all">Alle anzeigen (${total})</button>` : ''}`;
+    }
     const items = listItems(kind, ls);
     if (!items.length) {
       let msg = kind === 'food'
@@ -989,6 +1043,18 @@
           style="background:${c}" data-action="accent" data-c="${c}" aria-label="${l}"></button>`).join('')}</div>
         ${field('Eigene Farbe', `<input type="color" value="${t.accent}" data-change="accent-custom" class="colorpick">`)}
         <p class="hint">Gilt für Buttons, Ringe, Hervorhebungen und Diagramme. Die Wahl gilt für dieses Gerät.</p>
+      </section>
+      <section class="card">
+        <h2>Mahlzeiten im Tagebuch</h2>
+        <ul class="list">${mealConfig().map((m, i, all) => `<li>
+          <label class="switch" aria-label="${esc(m.label)} anzeigen"><input type="checkbox" data-change="meal-on" data-i="${i}" ${m.on ? 'checked' : ''}><span></span></label>
+          <input class="grow-input" value="${esc(m.label)}" data-change="meal-name" data-i="${i}" aria-label="Name der Mahlzeit" autocomplete="off">
+          <button class="icon" data-action="meal-up" data-i="${i}" aria-label="Nach oben" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="icon" data-action="meal-down" data-i="${i}" aria-label="Nach unten" ${i === all.length - 1 ? 'disabled' : ''}>↓</button>
+          ${MEAL_CATALOG.some((c) => c[0] === m.key) ? '' : `<button class="icon danger" data-action="meal-del" data-i="${i}" aria-label="Mahlzeit löschen">×</button>`}
+        </li>`).join('')}</ul>
+        <button class="ghost" data-action="meal-add">+ Eigene Mahlzeit</button>
+        <p class="hint">Eingeschaltete Mahlzeiten erscheinen im Tagebuch, in der hier gezeigten Reihenfolge. Schaltest du eine aus, bleiben bereits eingetragene Einträge an ihrem Tag sichtbar.</p>
       </section>`;
   }
 
@@ -1048,20 +1114,22 @@
       <p class="muted small">Schätzt Kalorien und Zutaten aus einem Foto. Dafür brauchst du einen eigenen, kostenlosen Schlüssel von Google (Gemini). Das Foto wird zur Analyse an Google gesendet und nicht gespeichert. Im kostenlosen Tarif darf Google Eingaben zur Produktverbesserung nutzen. Der Schlüssel bleibt nur auf diesem Gerät und ist nicht im Export.</p>
       <form data-form="ai" class="stack">
         ${field('API-Schlüssel', `<input name="key" type="password" autocomplete="off" placeholder="${ai.key ? 'gespeichert, zum Ändern neu eingeben' : 'Schlüssel einfügen'}">`)}
-        ${field('Modell', `<input name="model" value="${esc(ai.model)}">`)}
+        ${field('Modell (leer lassen = automatisch)', `<input name="model" value="${esc(ai.model)}" placeholder="${esc(DEFAULT_MODEL)}" autocomplete="off">`)}
         <div class="row">
           <button class="primary">Speichern</button>
+          <button type="button" data-action="ai-test">Verbindung testen</button>
           ${ai.key ? '<button type="button" data-action="ai-clear">Schlüssel entfernen</button>' : ''}
         </div>
+        <div id="ai-test"></div>
       </form>
-      <p class="hint">Schlüssel erstellen: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Wenn Google das Modell ändert, hier den Namen anpassen.</p>
+      <p class="hint">Schlüssel erstellen: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Google schaltet Modelle regelmäßig ab. Die App sucht dann selbst ein verfügbares Modell. „Verbindung testen“ zeigt, ob alles klappt und wie lange eine Antwort dauert.</p>
     </section>`;
   }
 
   function renderProfile() {
     const sub = state.sub.profile;
     const body = { goals: renderGoals, look: renderLook, data: renderData, photo: renderPhotoSettings }[sub];
-    return seg('profile', [['goals', 'Ziele'], ['look', 'Darstellung'], ['data', 'Daten'], ['photo', 'Foto']], sub) + body();
+    return seg('profile', [['goals', 'Ziele'], ['look', 'Anzeige'], ['data', 'Daten'], ['photo', 'Foto']], sub) + body();
   }
 
   function renderWelcome() {
@@ -1094,7 +1162,8 @@
     }
     const v = views[state.tab];
     $('#title').textContent = v.title;
-    $('#view').innerHTML = v.render();
+    // Großer Titel wie in Apple-Apps. Beim Scrollen erscheint der kleine Titel oben.
+    $('#view').innerHTML = `<h1 class="large-title">${esc(v.title)}</h1>${v.render()}`;
     updateSubbar();
   }
 
@@ -1121,6 +1190,11 @@
   function closeModal() {
     Scanner.stop();
     state.picker = null;
+    // Läuft gerade eine Foto-Schätzung, wird sie mit dem Schließen abgebrochen
+    if (state.photo) {
+      if (state.photo.ctl) state.photo.ctl.abort();
+      clearInterval(state.photo.ticker);
+    }
     state.photo = null;
     $('#modal').hidden = true;
     $('#modal').innerHTML = '';
@@ -1173,7 +1247,7 @@
   // Nährwerte pro 100 g. Eigene und gescannte Produkte sind direkt änderbar, Standard-Einträge nur lesbar.
   function valueFields(f) {
     if (!ownIds().has(f.id)) {
-      return `<p class="muted small">Pro 100 g: ${fmtK(f.kcal)} kcal · E ${fmt(f.p, 1)} · F ${fmt(f.f, 1)} · KH ${fmt(f.c, 1)}</p>`;
+      return `<p class="muted small">Pro 100 g: ${fmtK(f.kcal)} kcal · E ${fmt(f.p, 1)} · F ${fmt(f.f, 1)} · KH ${fmt(f.c, 1)}${f.piece ? ` · 1 Stück = ${fmt(f.piece)} g` : ''}</p>`;
     }
     const num = (name, label, val) => field(label, `<input id="v-${name}" name="${name}" type="number" step="any" min="0"
       inputmode="decimal" value="${val}" data-input="amount" required>`);
@@ -1182,38 +1256,61 @@
       <div class="grid4 values">
         ${num('kcal', 'kcal', f.kcal)}${num('p', 'Eiweiß', f.p)}${num('f', 'Fett', f.f)}${num('c', 'KH', f.c)}
       </div>
+      ${field('Gewicht pro Stück oder Portion in g (optional)', `<input id="v-piece" type="number" step="any" min="0" inputmode="decimal"
+        value="${f.piece || ''}" placeholder="z. B. 35" data-input="amount">`)}
     </div>`;
   }
 
   // Liest die Werte aus den Feldern. Gibt null zurück, wenn es keine Felder gibt (Standard-Eintrag).
   function readValues() {
     if (!$('#v-kcal')) return null;
-    return { kcal: n($('#v-kcal').value), p: n($('#v-p').value), f: n($('#v-f').value), c: n($('#v-c').value) };
+    return {
+      kcal: n($('#v-kcal').value), p: n($('#v-p').value), f: n($('#v-f').value), c: n($('#v-c').value),
+      piece: n($('#v-piece').value) || null,
+    };
   }
 
-  // Speichert geänderte Werte dauerhaft und gibt das aktualisierte Lebensmittel zurück
-  function persistValues(food, vals) {
+  // Speichert Felder eines eigenen oder gescannten Lebensmittels dauerhaft und gibt es aktualisiert zurück.
+  // markComplete entfernt den Hinweis „Angaben unvollständig“, wenn der Nutzer die Werte selbst bestätigt.
+  function persistValues(food, vals, markComplete = true) {
     const upd = (list) => list.map((x) => (x.id === food.id
-      ? { ...x, ...vals, ...(x.complete === undefined ? {} : { complete: true }) } : x));
+      ? { ...x, ...vals, ...(markComplete && x.complete !== undefined ? { complete: true } : {}) } : x));
     Store.set('custom', upd(data.custom()));
     Store.set('products', upd(data.products()));
     return allFoods().find((x) => x.id === food.id) || { ...food, ...vals };
   }
 
-  const valuesChanged = (food, v) => ['kcal', 'p', 'f', 'c'].some((k) => Math.abs((food[k] || 0) - v[k]) > 1e-9);
+  const valuesChanged = (food, v) => ['kcal', 'p', 'f', 'c'].some((k) => Math.abs((food[k] || 0) - v[k]) > 1e-9)
+    || (food.piece || null) !== v.piece;
+
+  // Standard-Einheit: Stück, wenn bekannt und gewünscht (eigene Lebensmittel merken sich die letzte Wahl)
+  function defaultUnit(f) {
+    if (!f.piece) return 'g';
+    return ownIds().has(f.id) ? (f.unitPref === 'pc' ? 'pc' : 'g') : 'pc';
+  }
+
+  const amountChips = (p) => (p.unit === 'pc' ? [1, 2, 3, 4, 6] : [50, 100, 150, 200])
+    .map((v) => `<button type="button" class="chip" data-action="amount-set" data-v="${v}">${v}${p.unit === 'pc' ? ' Stück' : ' g'}</button>`).join('');
 
   function pickerBody(p) {
     if (p.view === 'amount' && p.food) {
       const f = p.food;
-      const chips = [50, 100, 150, 200].map((g) => `<button type="button" class="chip" data-action="amount-set" data-v="${g}">${g} g</button>`)
-        .concat(f.piece ? [`<button type="button" class="chip" data-action="amount-set" data-v="${f.piece}">1 Stück (${fmt(f.piece)} g)</button>`] : []);
+      if (p.unitFor !== f.id) {
+        p.unit = defaultUnit(f);
+        p.unitFor = f.id;
+      }
+      const canPieces = !!f.piece || ownIds().has(f.id);
+      const pc = p.unit === 'pc';
       return `<form data-form="amount" class="stack">
         <button type="button" class="linkish left" data-action="pk-back">‹ Zurück</button>
         <h2>${esc(f.name)}</h2>
         ${valueFields(f)}
         ${f.complete === false ? '<div class="note warn">Angaben unvollständig. Bitte mit der Packung vergleichen.</div>' : ''}
-        ${field('Menge in Gramm', `<input id="amount" name="amount" type="number" step="any" inputmode="decimal" value="${f.piece || 100}" data-input="amount" required>`)}
-        <div class="chips">${chips.join('')}</div>
+        ${canPieces ? `<div class="seg"><button type="button" class="${pc ? '' : 'on'}" data-action="amount-unit" data-v="g">Gramm</button>
+          <button type="button" class="${pc ? 'on' : ''}" data-action="amount-unit" data-v="pc">Stück</button></div>` : ''}
+        <label class="field"><span id="amount-label">${pc ? 'Anzahl Stück' : 'Menge in Gramm'}</span>
+          <input id="amount" name="amount" type="number" step="any" inputmode="decimal" value="${pc ? 1 : (f.piece || 100)}" data-input="amount" required></label>
+        <div class="chips" id="amount-chips">${amountChips(p)}</div>
         <div id="amount-preview" class="line"></div>
         <button class="primary wide">Eintragen</button>
         ${p.target !== 'swap' ? '<button type="button" class="ghost" data-action="amount-more">Eintragen und weiteres hinzufügen</button>' : ''}
@@ -1304,14 +1401,38 @@
     }
   }
 
+  // Gewicht pro Stück: aus dem Feld, falls vorhanden, sonst aus dem Lebensmittel
+  function pieceWeight(p) {
+    const v = readValues();
+    return v ? (v.piece || 0) : (p.food.piece || 0);
+  }
+
+  // Wechselt zwischen Gramm und Stück, ohne die Felder zu verlieren
+  function applyUnit() {
+    const p = state.picker;
+    const pc = p.unit === 'pc';
+    document.querySelectorAll('[data-action="amount-unit"]').forEach((b) => b.classList.toggle('on', b.dataset.v === p.unit));
+    $('#amount-label').textContent = pc ? 'Anzahl Stück' : 'Menge in Gramm';
+    $('#amount').value = pc ? 1 : (pieceWeight(p) || 100);
+    $('#amount-chips').innerHTML = amountChips(p);
+    renderAmountPreview();
+  }
+
   function renderAmountPreview() {
     const box = $('#amount-preview');
     const p = state.picker;
     if (!box || !p) return;
     const amount = n($('#amount').value);
     if (p.view === 'amount') {
-      const t = totals({ grams: amount, base: readValues() || p.food });
-      box.innerHTML = `<b>Nährwerte</b><b>${macroLine(t)}</b>`;
+      const piece = pieceWeight(p);
+      const pc = p.unit === 'pc';
+      const grams = pc ? amount * piece : amount;
+      const t = totals({ grams, base: readValues() || p.food });
+      box.innerHTML = pc && !piece
+        ? '<div class="note warn">Trage oben das Gewicht pro Stück ein, dann rechnet die App um.</div>'
+        : `${pc ? `<div class="muted small">${fmt(amount, 2)} Stück × ${fmt(piece)} g = ${fmt(grams)} g</div>` : ''}
+          <div class="line"><b>Nährwerte</b><b>${macroLine(t)}</b></div>`;
+      box.classList.remove('line');
     } else {
       const d = data.dishes().find((x) => x.id === p.dishId);
       const per = Dish.perPortion(d);
@@ -1521,7 +1642,12 @@
       body = `<div class="note">Für die Foto-Schätzung brauchst du einen eigenen, kostenlosen Google-Schlüssel (Gemini).</div>
         <button class="primary wide" data-action="goto-photo-settings">Schlüssel eintragen</button>`;
     } else if (ph.busy) {
-      body = '<p class="muted">Foto wird analysiert …</p>';
+      body = `<div class="busy">
+        <div class="spinner" aria-hidden="true"></div>
+        <p><b>Foto wird analysiert …</b> <span class="muted" id="ph-sec">${Math.round((Date.now() - ph.started) / 1000)} s</span></p>
+        <p class="muted small">Das kann bis zu 30 Sekunden dauern. Nach 60 Sekunden bricht die App ab.</p>
+        <button class="ghost" data-action="ph-cancel">Abbrechen</button>
+      </div>`;
     } else if (ph.result && ph.mode === 'items') {
       const r = ph.result;
       const tot = Calc.sumEntries(r.items);
@@ -1576,17 +1702,53 @@
     ph.busy = true;
     ph.error = '';
     ph.result = null;
+    ph.ctl = new AbortController();
+    ph.started = Date.now();
+    ph.ticker = setInterval(() => {
+      const el = $('#ph-sec');
+      if (el) el.textContent = `${Math.round((Date.now() - ph.started) / 1000)} s`;
+    }, 1000);
     renderPhoto();
     try {
-      const result = await Vision.estimate(file, ai.key, ai.model || DEFAULT_MODEL, ph.mode);
+      const result = await Vision.estimate(file, ai.key, ai.model || DEFAULT_MODEL, ph.mode, { signal: ph.ctl.signal });
       if (state.photo !== ph) return;
       ph.result = result;
+      // Hat die App ein anderes Modell gefunden, bleibt es gespeichert
+      if (result.model && result.model !== ai.model) {
+        Store.set('ai', { ...ai, model: result.model });
+        toast(`Modell automatisch auf ${result.model} gestellt.`);
+      }
     } catch (err) {
       if (state.photo !== ph) return;
-      ph.error = err.message;
+      ph.error = err.message === 'Abgebrochen.' ? '' : err.message;
+    } finally {
+      clearInterval(ph.ticker);
     }
     ph.busy = false;
     renderPhoto();
+  }
+
+  // Prüft Schlüssel und Modell und zeigt das Ergebnis direkt im Profil
+  async function testAi() {
+    const out = $('#ai-test');
+    const form = document.querySelector('[data-form="ai"]');
+    const cur = data.ai();
+    const typedKey = form ? form.querySelector('[name="key"]').value.trim() : '';
+    const key = typedKey || cur.key;
+    if (!key) return toast('Bitte zuerst den Schlüssel eintragen.');
+    const model = (form ? form.querySelector('[name="model"]').value.trim() : '') || cur.model;
+    out.innerHTML = '<p class="muted small">Verbindung wird getestet … (bis zu 60 Sekunden)</p>';
+    try {
+      const r = await Vision.test(key, model);
+      Store.set('ai', { key, model: r.model });
+      if (form) {
+        form.querySelector('[name="model"]').value = r.model;
+        form.querySelector('[name="key"]').value = '';
+      }
+      out.innerHTML = `<div class="note">✓ Verbindung steht. Modell: ${esc(r.model)}${r.changed ? ' (automatisch gewählt)' : ''}. Antwort nach ${fmt(r.seconds, 1)} s. Schlüssel und Modell sind gespeichert.</div>`;
+    } catch (err) {
+      out.innerHTML = `<div class="note warn">${esc(err.message)}</div>`;
+    }
   }
 
   // ---------- Aktionen ----------
@@ -1597,6 +1759,9 @@
     const g = n(value);
     if (!e || g <= 0) return render();
     e.grams = g;
+    // Die Stückzahl passt nach einer Änderung in Gramm nicht mehr
+    delete e.pieces;
+    delete e.pieceG;
     data.saveDay(state.date, day);
     return render();
   }
@@ -1808,6 +1973,9 @@
       case 'pk-dish':
         Object.assign(state.picker, { view: 'dish', dishId: ds.id, added: '' });
         return renderPicker();
+      case 'amount-unit':
+        state.picker.unit = ds.v;
+        return applyUnit();
       case 'amount-set':
         $('#amount').value = ds.v;
         return renderAmountPreview();
@@ -1815,7 +1983,8 @@
         return submitAmount(true);
       case 'filter': {
         const { ls } = lsFor(ds.scope);
-        ls.filter = ds.v;
+        // Ein zweiter Klick auf den aktiven Filter blendet die Liste wieder aus
+        ls.filter = !ls.q && ls.filter === ds.v ? '' : ds.v;
         ls.q = '';
         ls.limit = 30;
         return ds.scope === 'picker' ? renderPicker() : render();
@@ -1903,6 +2072,11 @@
       case 'ph-reset':
         Object.assign(state.photo, { result: null, error: '' });
         return renderPhoto();
+      case 'ph-cancel':
+        if (state.photo && state.photo.ctl) state.photo.ctl.abort();
+        return undefined;
+      case 'ai-test':
+        return testAi();
       case 'ph-add': {
         const items = state.photo.result.items.map((it) => ({ ...it, estimated: true }));
         if (!items.length) return toast('Keine Einträge vorhanden.');
@@ -1925,6 +2099,35 @@
       case 'theme-mode':
         themeSave({ mode: ds.v });
         return render();
+
+      // Mahlzeiten konfigurieren
+      case 'meal-up':
+      case 'meal-down': {
+        const list = mealConfig();
+        const i = Number(ds.i);
+        const j = action === 'meal-up' ? i - 1 : i + 1;
+        if (j < 0 || j >= list.length) return undefined;
+        [list[i], list[j]] = [list[j], list[i]];
+        saveMealConfig(list);
+        return render();
+      }
+      case 'meal-add':
+        return openDialog(`<h2>Eigene Mahlzeit</h2>
+          <form data-form="meal-add" class="stack">
+            ${field('Name', '<input name="name" placeholder="z. B. Intra-Workout" required autocomplete="off">')}
+            <button class="primary wide">Hinzufügen</button>
+            <button type="button" class="linkish" data-action="close-dialog">Abbrechen</button>
+          </form>`);
+      case 'meal-del': {
+        const list = mealConfig();
+        const m = list[Number(ds.i)];
+        if (!m) return undefined;
+        if (mealHasEntries(m.key)) return toast('Dafür gibt es noch Einträge. Schalte die Mahlzeit stattdessen aus.');
+        if (!confirm(`Mahlzeit „${m.label}“ löschen?`)) return undefined;
+        list.splice(Number(ds.i), 1);
+        saveMealConfig(list);
+        return render();
+      }
       case 'accent':
         themeSave({ accent: ds.c });
         return render();
@@ -2123,7 +2326,18 @@
       p.food = persistValues(p.food, vals);
       toast('Geänderte Werte gespeichert.');
     }
-    return commitItems([foodItem(p.food, amount)], more, p.food.name);
+    let grams = amount;
+    let pieces = null;
+    if (p.unit === 'pc') {
+      if (!p.food.piece) return toast('Bitte zuerst das Gewicht pro Stück eintragen.');
+      pieces = amount;
+      grams = Math.round(amount * p.food.piece * 10) / 10;
+    }
+    // Eigene Lebensmittel merken sich, ob zuletzt in Gramm oder Stück gerechnet wurde
+    if (ownIds().has(p.food.id) && p.food.piece && (p.food.unitPref || 'g') !== p.unit) {
+      p.food = persistValues(p.food, { unitPref: p.unit }, false);
+    }
+    return commitItems([foodItem(p.food, grams, pieces)], more, p.food.name);
   }
 
   function handleSubmit(formName, form, f) {
@@ -2199,6 +2413,7 @@
         Store.set('dishes', [...data.dishes(), dish]);
         state.cook = null;
         closeDialog();
+        render(); // „Als Gericht speichern“ verschwindet, weil es das Gericht jetzt gibt
         return toast(`Gericht „${dish.name}“ gespeichert. Du findest es im Kochbuch.`);
       }
       case 'ean': {
@@ -2224,6 +2439,15 @@
         list.push({ date, kg });
         Store.set('weights', list);
         toast('Gewicht gespeichert.');
+        return render();
+      }
+      case 'meal-add': {
+        const label = get('name').trim();
+        if (!label) return toast('Bitte einen Namen eingeben.');
+        const list = mealConfig();
+        list.push({ key: 'm' + uid(), label, on: true });
+        saveMealConfig(list);
+        closeDialog();
         return render();
       }
       case 'plan-quick': {
@@ -2273,7 +2497,8 @@
         if (s.proteinPerKg && (s.proteinPerKg < 0.8 || s.proteinPerKg > 4)) return toast('Eiweiß: bitte einen Wert zwischen 0,8 und 4 g/kg nehmen.');
         if (s.fatPct && (s.fatPct < 10 || s.fatPct > 60)) return toast('Fett: bitte einen Wert zwischen 10 und 60 % nehmen.');
         if (mode === 'manual' && !s.manual.kcal) return toast('Bitte die Kalorien für deine Ziele eintragen.');
-        Store.set('settings', s);
+        // Bestehende Einstellungen wie die Mahlzeiten-Auswahl bleiben erhalten
+        Store.set('settings', { ...Store.get('settings', {}), ...s });
         Store.renameProfile(Store.activeId(), s.name);
         toast('Gespeichert.');
         return render();
@@ -2324,6 +2549,16 @@
       case 'draft-servings':
         syncDraft();
         return renderEditor();
+      case 'meal-on':
+      case 'meal-name': {
+        const list = mealConfig();
+        const m = list[Number(el.dataset.i)];
+        if (!m) return undefined;
+        if (el.dataset.change === 'meal-on') m.on = el.checked;
+        else m.label = el.value.trim() || m.label;
+        saveMealConfig(list);
+        return render();
+      }
       case 'tname':
         // Übung geändert: Platzhalter mit den Werten vom letzten Mal neu laden
         syncTDraft();

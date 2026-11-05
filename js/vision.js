@@ -1,7 +1,12 @@
 // Foto-Schätzung von Mahlzeiten über die Gemini-Schnittstelle von Google.
 // Optional: Es wird ein eigener, kostenloser Schlüssel des Nutzers benötigt. Er bleibt nur im Browser.
 // Das Foto wird verkleinert (ohne Standort-Daten) und nur für die Anfrage gesendet, nicht gespeichert.
+// Google schaltet Modelle regelmäßig ab. Deshalb sucht die App bei Bedarf selbst ein verfügbares Flash-Modell.
 const Vision = (() => {
+  const BASE = 'https://generativelanguage.googleapis.com/v1beta';
+  const DEFAULT_MODEL = 'gemini-flash-latest';
+  const TIMEOUT_MS = 60000;
+
   // Modus 'items': Zutaten einzeln. Modus 'dish': ganzes Gericht (z. B. im Restaurant, Zutaten unbekannt).
   const PROMPTS = {
     items: [
@@ -25,8 +30,8 @@ const Vision = (() => {
     ].join('\n'),
   };
 
-  // Verkleinert das Bild auf max. 1024 px. Das entfernt auch Metadaten wie den Standort.
-  function toJpegBase64(file, max = 1024) {
+  // Verkleinert das Bild auf max. 896 px. Das entfernt auch Metadaten wie den Standort und beschleunigt das Senden.
+  function toJpegBase64(file, max = 896) {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
@@ -37,7 +42,7 @@ const Vision = (() => {
         canvas.height = Math.round(img.height * k);
         canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
         URL.revokeObjectURL(url);
-        resolve(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+        resolve(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
       };
       img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Das Bild konnte nicht gelesen werden.')); };
       img.src = url;
@@ -49,14 +54,22 @@ const Vision = (() => {
     return Number.isFinite(x) && x > 0 ? x : 0;
   };
 
-  // Liest die Antwort des Modells. Gibt {name, confidence, note, items} zurück.
-  // items haben die Form eines Tagebuch-Eintrags: {name, grams, base} mit Werten pro 100 g.
-  function parse(text) {
+  function jsonFrom(text) {
     const cleaned = String(text).replace(/```json|```/gi, '').trim();
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
     if (start < 0 || end < start) throw new Error('Die Antwort war nicht lesbar.');
-    const data = JSON.parse(cleaned.slice(start, end + 1));
+    try {
+      return JSON.parse(cleaned.slice(start, end + 1));
+    } catch (err) {
+      throw new Error('Die Antwort war nicht lesbar.');
+    }
+  }
+
+  // Liest die Antwort des Modells. Gibt {name, confidence, note, items} zurück.
+  // items haben die Form eines Tagebuch-Eintrags: {name, grams, base} mit Werten pro 100 g.
+  function parse(text) {
+    const data = jsonFrom(text);
     const items = (Array.isArray(data.items) ? data.items : [])
       .map((i) => {
         const grams = num(i.grams);
@@ -79,11 +92,7 @@ const Vision = (() => {
 
   // Liest die Antwort im Modus 'dish'. Gibt {name, confidence, note, total} mit Werten für die ganze Portion zurück.
   function parseDish(text) {
-    const cleaned = String(text).replace(/```json|```/gi, '').trim();
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
-    if (start < 0 || end < start) throw new Error('Die Antwort war nicht lesbar.');
-    const data = JSON.parse(cleaned.slice(start, end + 1));
+    const data = jsonFrom(text);
     const kcal = Math.round(num(data.kcal));
     if (kcal <= 0) throw new Error('Es wurde kein Essen erkannt.');
     return {
@@ -99,42 +108,137 @@ const Vision = (() => {
     };
   }
 
-  async function estimate(file, key, model, mode = 'items') {
-    const data = await toJpegBase64(file);
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  // ---------- Verbindung ----------
+
+  // Ruft die Schnittstelle auf. Liefert {ok, status, message, json}. Wirft nur bei Abbruch, Zeitüberschreitung und Netzfehlern.
+  async function call(path, key, init = {}, outerSignal = null) {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 45000);
-    let res;
+    let reason = 'timeout';
+    const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+    const onAbort = () => { reason = 'cancel'; ctl.abort(); };
+    if (outerSignal) {
+      if (outerSignal.aborted) onAbort();
+      else outerSignal.addEventListener('abort', onAbort);
+    }
     try {
-      res = await fetch(url, {
-        method: 'POST',
+      const res = await fetch(BASE + path, {
+        ...init,
         signal: ctl.signal,
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: PROMPTS[mode] || PROMPTS.items }, { inline_data: { mime_type: 'image/jpeg', data } }] }],
-          generationConfig: { temperature: 0.2 },
-        }),
       });
+      const json = await res.json().catch(() => ({}));
+      const message = json.error && json.error.message ? json.error.message : '';
+      return { ok: res.ok, status: res.status, message, json };
     } catch (err) {
-      if (err.name === 'AbortError') throw new Error('Zeitüberschreitung. Bitte erneut versuchen.');
-      throw new Error('Keine Verbindung. Internet prüfen.');
+      if (ctl.signal.aborted) {
+        throw new Error(reason === 'cancel'
+          ? 'Abgebrochen.'
+          : 'Keine Antwort von Google nach 60 Sekunden. Bitte erneut versuchen oder unter Profil → Foto die Verbindung testen.');
+      }
+      throw new Error('Keine Verbindung zu Google. Internet prüfen.');
     } finally {
       clearTimeout(timer);
+      if (outerSignal) outerSignal.removeEventListener('abort', onAbort);
     }
-
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const msg = json.error && json.error.message ? json.error.message : '';
-      if (res.status === 429) throw new Error('Das Limit des kostenlosen Tarifs ist erreicht. Später erneut versuchen.');
-      if (res.status === 400 || res.status === 403) throw new Error('Schlüssel oder Modell abgelehnt. ' + msg);
-      throw new Error(`Fehler ${res.status}. ${msg}`);
-    }
-    const parts = json.candidates && json.candidates[0] && json.candidates[0].content
-      ? json.candidates[0].content.parts : null;
-    if (!parts || !parts.length) throw new Error('Keine Antwort erhalten. Bitte mit anderem Foto erneut versuchen.');
-    const text = parts.map((p) => p.text || '').join('');
-    return mode === 'dish' ? parseDish(text) : parse(text);
   }
 
-  return { estimate, parse, parseDish };
+  function explain(r) {
+    if (r.status === 400 && /API key not valid|API_KEY_INVALID/i.test(r.message + JSON.stringify(r.json))) {
+      return 'Der Schlüssel ist ungültig. Bitte unter Profil → Foto prüfen.';
+    }
+    if (r.status === 403) return 'Der Schlüssel hat keinen Zugriff. ' + r.message;
+    if (r.status === 429) return 'Das Limit des kostenlosen Tarifs ist erreicht. Später erneut versuchen.';
+    if (r.status === 404) return 'Das Modell ist bei Google nicht mehr verfügbar. ' + r.message;
+    if (r.status >= 500) return `Google ist gerade überlastet (Fehler ${r.status}). Bitte gleich noch einmal versuchen.`;
+    return `Fehler ${r.status}. ${r.message}`;
+  }
+
+  // Wählt aus den Modellnamen das beste Flash-Modell. Der Alias "gemini-flash-latest" hat Vorrang.
+  function chooseModel(names) {
+    const bad = /lite|image|live|tts|audio|embed|robotics|computer|customtools|thinking|exp|vision/i;
+    const ok = names.filter((n) => /^gemini-/.test(n) && /flash/.test(n) && !bad.test(n));
+    if (ok.includes('gemini-flash-latest')) return 'gemini-flash-latest';
+    const score = (n) => {
+      const m = n.match(/gemini-(\d+(?:\.\d+)?)-flash/);
+      return (m ? parseFloat(m[1]) : 0) * 10 - (/preview/.test(n) ? 3 : 0);
+    };
+    return ok.sort((a, b) => score(b) - score(a))[0] || null;
+  }
+
+  // Namen aller Modelle, die Inhalte erzeugen können (ohne "models/")
+  async function listModels(key, signal) {
+    const names = [];
+    let token = '';
+    for (let page = 0; page < 4; page += 1) {
+      const r = await call(`/models?pageSize=200${token ? '&pageToken=' + encodeURIComponent(token) : ''}`, key, { method: 'GET' }, signal);
+      if (!r.ok) throw new Error(explain(r));
+      (r.json.models || []).forEach((m) => {
+        if ((m.supportedGenerationMethods || []).includes('generateContent')) names.push(String(m.name).replace(/^models\//, ''));
+      });
+      token = r.json.nextPageToken || '';
+      if (!token) break;
+    }
+    return names;
+  }
+
+  // Erzeugt Inhalte. Zusatzoptionen (JSON-Ausgabe, wenig Nachdenken) werden bei Ablehnung weggelassen.
+  async function generate(model, parts, key, signal) {
+    const variants = [{ json: true, quick: true }, {}];
+    let last;
+    for (const v of variants) {
+      const cfg = { temperature: 0.2 };
+      if (v.json) cfg.responseMimeType = 'application/json';
+      if (v.quick && /2\.5-flash/.test(model)) cfg.thinkingConfig = { thinkingBudget: 0 };
+      const body = JSON.stringify({ contents: [{ parts }], generationConfig: cfg });
+      const path = `/models/${encodeURIComponent(model)}:generateContent`;
+      last = await call(path, key, { method: 'POST', body }, signal);
+      if (last.status >= 500) last = await call(path, key, { method: 'POST', body }, signal); // einmal wiederholen
+      const unsupported = last.status === 400 && /mime|thinking|response/i.test(last.message);
+      if (!unsupported) return last;
+    }
+    return last;
+  }
+
+  function textOf(json) {
+    const cand = json.candidates && json.candidates[0];
+    if (!cand || !cand.content || !cand.content.parts) {
+      const block = json.promptFeedback && json.promptFeedback.blockReason;
+      throw new Error(block ? `Das Foto wurde von Google abgelehnt (${block}).` : 'Keine Antwort erhalten. Bitte mit anderem Foto erneut versuchen.');
+    }
+    // Gedanken-Teile des Modells nicht mitlesen
+    return cand.content.parts.filter((p) => !p.thought).map((p) => p.text || '').join('');
+  }
+
+  // Schätzt eine Mahlzeit. opts.signal bricht ab. Gibt das Ergebnis plus das tatsächlich genutzte Modell zurück.
+  async function estimate(file, key, model, mode = 'items', opts = {}) {
+    const data = await toJpegBase64(file);
+    const parts = [{ text: PROMPTS[mode] || PROMPTS.items }, { inline_data: { mime_type: 'image/jpeg', data } }];
+    let use = model || DEFAULT_MODEL;
+    let r = await generate(use, parts, key, opts.signal);
+    // Modell weg oder unbekannt: ein verfügbares suchen und noch einmal versuchen
+    if (!r.ok && (r.status === 404 || /no longer available|not found|not supported/i.test(r.message))) {
+      const found = chooseModel(await listModels(key, opts.signal));
+      if (found && found !== use) {
+        use = found;
+        r = await generate(use, parts, key, opts.signal);
+      }
+    }
+    if (!r.ok) throw new Error(explain(r));
+    const text = textOf(r.json);
+    return { ...(mode === 'dish' ? parseDish(text) : parse(text)), model: use };
+  }
+
+  // Verbindungstest: prüft Schlüssel, findet ein Modell und misst eine kurze Antwort
+  async function test(key, model, signal) {
+    const t0 = Date.now();
+    const names = await listModels(key, signal);
+    const wanted = model || DEFAULT_MODEL;
+    const use = names.includes(wanted) ? wanted : chooseModel(names);
+    if (!use) throw new Error('Für diesen Schlüssel wurde kein Gemini-Flash-Modell gefunden.');
+    const r = await generate(use, [{ text: 'Antworte nur mit dem Wort OK.' }], key, signal);
+    if (!r.ok) throw new Error(explain(r));
+    return { model: use, changed: use !== wanted, count: names.length, seconds: Math.round((Date.now() - t0) / 100) / 10 };
+  }
+
+  return { estimate, test, parse, parseDish, chooseModel, DEFAULT_MODEL };
 })();
