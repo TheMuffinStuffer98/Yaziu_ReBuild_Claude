@@ -41,7 +41,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
-  const APP_VERSION = 'v15'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v16'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -509,15 +509,7 @@
           <button class="water-add" data-action="water" data-ml="250" aria-label="250 Milliliter Wasser hinzufügen">+250 ml</button>
         </div>
       </section>
-      ${mealsForDay(day.entries).map((m) => mealCard(m.key, m.label, day.entries)).join('')}
-      <section class="card">
-        <div class="line"><h2>Wasser</h2><span class="muted">${fmt(day.water)} / ${fmt(g.water)} ml</span></div>
-        <div class="row">
-          <button data-action="water" data-ml="-250">−250</button>
-          <button data-action="water" data-ml="250">+250</button>
-          <button data-action="water" data-ml="500">+500</button>
-        </div>
-      </section>`;
+      ${mealsForDay(day.entries).map((m) => mealCard(m.key, m.label, day.entries)).join('')}`;
   }
 
   function updateSubbar() {
