@@ -41,7 +41,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
-  const APP_VERSION = 'v14'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v15'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -320,6 +320,19 @@
     </div>`;
   }
 
+  // Wassertropfen, der sich von unten füllt (immer blau, unabhängig von der Akzentfarbe)
+  const DROP_PATH = 'M12 1.5C12 1.5 3.5 12 3.5 19.5a8.5 8.5 0 0 0 17 0C20.5 12 12 1.5 12 1.5z';
+  function drop(ml, goal) {
+    const pct = goal > 0 ? Math.max(0, Math.min(1, ml / goal)) : 0;
+    const h = 26.5 * pct; // der Tropfen reicht von y = 1,5 bis y = 28
+    return `<svg viewBox="0 0 24 30" class="drop" aria-hidden="true">
+      <defs><clipPath id="drop-clip"><path d="${DROP_PATH}"/></clipPath></defs>
+      <path d="${DROP_PATH}" class="drop-bg"/>
+      <rect x="0" y="${(28 - h).toFixed(1)}" width="24" height="${(h + 1).toFixed(1)}" clip-path="url(#drop-clip)" class="drop-fill"/>
+      <path d="${DROP_PATH}" class="drop-line"/>
+    </svg>`;
+  }
+
   // Ring für den Kalorienstand des Tages
   function ring(eaten, goal) {
     const R = 52, C = 2 * Math.PI * R;
@@ -472,20 +485,28 @@
         <button class="icon" data-action="day" data-d="1" aria-label="Nächster Tag">›</button>
       </div>
       <section class="card hero">
-        <div class="hero-ring">
-          ${ring(t.kcal, goalKcal)}
-          <div class="hero-center">
-            <span class="big">${fmt(Math.abs(left))}</span>
-            <span class="small">${left >= 0 ? 'kcal übrig' : 'kcal zu viel'}</span>
+        <div class="hero-main">
+          <div class="hero-ring">
+            ${ring(t.kcal, goalKcal)}
+            <div class="hero-center">
+              <span class="big">${fmt(Math.abs(left))}</span>
+              <span class="small">${left >= 0 ? 'kcal übrig' : 'kcal zu viel'}</span>
+            </div>
+          </div>
+          <div class="hero-side">
+            <div class="muted small">Gegessen</div>
+            <div class="hero-num">${fmt(t.kcal)} <span class="muted small">/ ${fmt(goalKcal)} kcal</span></div>
+            ${bonus ? `<div class="muted small">inkl. ${fmt(bonus)} kcal aus Cardio</div>` : ''}
+            ${macroBar('Eiweiß', t.p, g.p, 'p')}
+            ${macroBar('Fett', t.f, g.f, 'f')}
+            ${macroBar('Kohlenh.', t.c, g.c, 'c')}
           </div>
         </div>
-        <div class="hero-side">
-          <div class="muted small">Gegessen</div>
-          <div class="hero-num">${fmt(t.kcal)} <span class="muted small">/ ${fmt(goalKcal)} kcal</span></div>
-          ${bonus ? `<div class="muted small">inkl. ${fmt(bonus)} kcal aus Cardio</div>` : ''}
-          ${macroBar('Eiweiß', t.p, g.p, 'p')}
-          ${macroBar('Fett', t.f, g.f, 'f')}
-          ${macroBar('Kohlenh.', t.c, g.c, 'c')}
+        <div class="hero-water">
+          ${drop(day.water, g.water)}
+          <div class="grow"><b>Wasser</b>
+            <small class="muted">${fmt(day.water)} / ${fmt(g.water)} ml${g.water > 0 && day.water >= g.water ? ' · Ziel erreicht' : ''}</small></div>
+          <button class="water-add" data-action="water" data-ml="250" aria-label="250 Milliliter Wasser hinzufügen">+250 ml</button>
         </div>
       </section>
       ${mealsForDay(day.entries).map((m) => mealCard(m.key, m.label, day.entries)).join('')}

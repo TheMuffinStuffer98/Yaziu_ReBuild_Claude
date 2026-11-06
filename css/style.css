@@ -17,6 +17,7 @@
   --p: var(--accent);
   --f: #ff9f0a;
   --c: #0a84ff;
+  --water: #1e88e5; /* Wasser ist immer blau, unabhängig von der Akzentfarbe */
   --warn: #c93400;
   --danger: #ff3b30;
   --radius: 16px;
@@ -50,7 +51,8 @@
   --danger: #ff453a;
 }
 
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* Kein Heranzoomen: Doppeltippen zoomt nicht mehr. touch-action: manipulation lässt Tippen und Scrollen zu. */
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 [hidden] { display: none !important; }
 
 html, body {
@@ -115,7 +117,14 @@ main { padding: 0 16px 16px; max-width: 640px; margin: 0 auto; }
 .note-card { border: 1.5px solid var(--accent-soft); }
 
 /* Tagesübersicht: neutrale Fläche, farbiger Ring */
-.hero { display: flex; gap: 18px; align-items: center; }
+.hero { display: flex; flex-direction: column; gap: 14px; }
+.hero-main { display: flex; gap: 18px; align-items: center; }
+.hero-water { display: flex; align-items: center; gap: 12px; padding-top: 14px; border-top: 0.5px solid var(--line); }
+.drop { width: 26px; height: 32px; flex: 0 0 auto; }
+.drop-bg { fill: color-mix(in srgb, var(--water) 16%, transparent); }
+.drop-fill { fill: var(--water); }
+.drop-line { fill: none; stroke: var(--water); stroke-width: 1.2; }
+.water-add { background: color-mix(in srgb, var(--water) 16%, transparent); color: var(--water); border-radius: 999px; padding: 7px 14px; font-size: 0.85rem; }
 .hero .hero-ring { position: relative; width: 124px; height: 124px; flex: 0 0 124px; }
 .hero .hero-side { flex: 1; min-width: 0; }
 .hero .hero-num { font-size: 1.15rem; font-weight: 700; margin-bottom: 2px; font-variant-numeric: tabular-nums; }
@@ -142,7 +151,8 @@ main { padding: 0 16px 16px; max-width: 640px; margin: 0 auto; }
 
 /* Eingabefelder: gefüllt, ohne Rahmen */
 input, select, textarea {
-  font: inherit; color: inherit; background: var(--fill);
+  /* 16 px Mindestschrift: Kleinere Felder lässt iOS beim Antippen heranzoomen (auch wenn sie in Beschriftungen mit kleiner Schrift liegen) */
+  font: inherit; font-size: 16px; color: inherit; background: var(--fill);
   border: none; border-radius: 10px; padding: 11px 12px; min-width: 0; max-width: 100%;
   -webkit-appearance: none; appearance: none;
 }
@@ -364,8 +374,9 @@ details > summary { color: var(--accent); cursor: pointer; padding: 8px 0; font-
 .ttable.edit td { padding: 4px 2px; border-bottom: none; }
 .ttable.edit td:first-child { min-width: 92px; }
 .ttable.edit td:last-child { width: 30px; }
-.ttable.edit input { padding: 9px 6px; width: 100%; font-size: 0.9rem; }
-.ttable.edit .setin { min-width: 54px; text-align: center; }
+/* Felder mit weniger als 16 px Schrift lässt iOS beim Antippen heranzoomen. Deshalb hier 16 px. */
+.ttable.edit input { padding: 9px 4px; width: 100%; font-size: 16px; }
+.ttable.edit .setin { min-width: 58px; text-align: center; }
 .ttable.edit button.icon { padding: 2px 6px; }
 .tcard { padding: 14px; }
 .tcard .line { margin-top: 0; }
