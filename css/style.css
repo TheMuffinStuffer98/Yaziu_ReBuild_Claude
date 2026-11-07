@@ -384,6 +384,49 @@ details > summary { color: var(--accent); cursor: pointer; padding: 8px 0; font-
 .tbtns .ghost { margin-top: 8px; }
 .grow-input { flex: 1; }
 
+/* Mahlzeiten auf der Hauptseite: eine gruppierte Fläche mit Zeilen */
+.card.group { padding: 0 16px; }
+.mealrow {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: none; border-radius: 0; padding: 14px 0; border-bottom: 0.5px solid var(--line);
+  font-weight: 400;
+}
+.mealrow:last-child { border-bottom: none; }
+.mealrow:active { opacity: 0.5; transform: none; }
+.mealrow b { font-weight: 600; font-size: 1.02rem; }
+.mealkcal { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mealkcal small { font-weight: 400; color: var(--muted); }
+.chev { color: var(--muted); opacity: 0.7; font-size: 1.4rem; line-height: 1; }
+
+/* Mahlzeiten-Fenster */
+.sheet.tall { min-height: 82vh; max-height: 94vh; }
+.mw-head { display: flex; align-items: center; gap: 10px; }
+.mw-head h2 { margin: 0; font-size: 1.3rem; }
+.mw-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 10px 0 6px; }
+.mw-tab {
+  display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 11px 2px 9px;
+  background: var(--fill); color: var(--text); border-radius: 14px; font-size: 0.72rem; font-weight: 500;
+}
+.mw-tab svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.mw-tab.on { background: var(--accent); color: var(--on-accent); }
+
+/* Drei Trainingsarten als Kacheln mit Symbol */
+.newtiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 4px; }
+.ntile {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 4px 12px;
+  background: var(--accent-soft); color: var(--accent); border-radius: 14px; font-size: 0.8rem; font-weight: 600;
+}
+.ntile .act-icon svg { width: 30px; height: 30px; }
+.modebtn {
+  display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent); font-size: 0.66rem; font-weight: 600;
+}
+.badge {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--fill); color: var(--muted);
+  font-size: 0.7rem; font-weight: 500; vertical-align: middle;
+}
+.dlg-scroll { max-height: 40vh; overflow-y: auto; }
+
 /* Cardio: Aktivitäts-Kacheln und Kennzahlen wie in Apple Fitness */
 .newrow { margin-bottom: 4px; }
 button.primary.alt { background: var(--accent-soft); color: var(--accent); }

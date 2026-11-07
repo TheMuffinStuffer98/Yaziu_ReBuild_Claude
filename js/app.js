@@ -41,7 +41,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
-  const APP_VERSION = 'v16'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v17'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -376,23 +376,16 @@
     return data.dishes().some((d) => key(d.ingredients) === k);
   }
 
+  // Eine Mahlzeit auf der Hauptseite: nur Name, Kalorien und Makros. Ein Tipp öffnet das Mahlzeiten-Fenster.
   function mealCard(key, label, entries) {
     const list = entries.filter((e) => e.meal === key);
-    const kcal = sumEntries(list).kcal;
-    const yesterday = data.day(addDays(state.date, -1)).entries.filter((e) => e.meal === key);
-    return `<section class="card">
-      <div class="line"><h2>${label}</h2><span class="muted">${fmt(kcal)} kcal</span></div>
-      ${list.length ? `<ul class="list">${list.map(entryRow).join('')}</ul>` : '<p class="muted small">Noch nichts eingetragen.</p>'}
-      <div class="addrow">
-        <button class="add" data-action="open-picker" data-meal="${key}" data-pk="foods">+ Essen</button>
-        <button class="add" data-action="open-picker" data-meal="${key}" data-pk="dishes">Gericht</button>
-        <button class="add" data-action="photo-open" data-meal="${key}">Foto</button>
-      </div>
-      <div class="minor">
-        ${list.length && !mealIsDish(list) ? `<button class="linkish" data-action="meal-save" data-meal="${key}">Als Gericht speichern</button>` : ''}
-        ${!list.length && yesterday.length ? `<button class="linkish" data-action="meal-copy" data-meal="${key}">Von gestern übernehmen</button>` : ''}
-      </div>
-    </section>`;
+    const t = sumEntries(list);
+    return `<button class="mealrow" data-action="open-meal" data-meal="${key}">
+      <div class="grow"><b>${esc(label)}</b>
+        <small class="muted">${list.length ? `Eiweiß ${fmt(t.p)} g · Fett ${fmt(t.f)} g · KH ${fmt(t.c)} g` : 'Noch nichts eingetragen'}</small></div>
+      <span class="mealkcal">${fmt(t.kcal)}<small> kcal</small></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>`;
   }
 
   // Zusätzliche Kalorien für diesen Tag aus Cardio, je nach Einstellung 0, 50 oder 100 % der aktiven Kalorien.
@@ -509,7 +502,7 @@
           <button class="water-add" data-action="water" data-ml="250" aria-label="250 Milliliter Wasser hinzufügen">+250 ml</button>
         </div>
       </section>
-      ${mealsForDay(day.entries).map((m) => mealCard(m.key, m.label, day.entries)).join('')}`;
+      <section class="card group">${mealsForDay(day.entries).map((m) => mealCard(m.key, m.label, day.entries)).join('')}</section>`;
   }
 
   function updateSubbar() {
@@ -717,9 +710,53 @@
   };
   const nameList = () => `<datalist id="ex-names">${exerciseNames().map((n2) => `<option value="${esc(n2)}">`).join('')}</datalist>`;
 
+  // ---------- Calisthenics: nur Wiederholungen oder Haltezeit, kein Gewicht ----------
+
+  // Erfassungsart einer Übung: aus der Liste, sonst wie zuletzt benutzt, sonst Wiederholungen
+  function caliMode(name) {
+    const known = Cali.modeOf(name);
+    if (known) return known;
+    const key = String(name).trim().toLowerCase();
+    for (const w of sortedWorkouts()) {
+      if (w.type !== 'calisthenics') continue;
+      const ex = w.exercises.find((e) => e.name.toLowerCase() === key);
+      if (ex) return ex.mode === 'hold' ? 'hold' : 'reps';
+    }
+    return 'reps';
+  }
+
+  // Werte vom letzten Mal (Zahlen) für eine Übung, zuerst im letzten Training desselben Plans
+  function caliLast(name, planName) {
+    const key = String(name).trim().toLowerCase();
+    if (!key) return [];
+    const list = sortedWorkouts().filter((w) => w.type === 'calisthenics');
+    const find = (arr) => {
+      for (const w of arr) {
+        const ex = w.exercises.find((e) => e.name.toLowerCase() === key);
+        if (ex) return ex.sets.map((s) => (ex.mode === 'hold' ? s.s : s.r));
+      }
+      return null;
+    };
+    return (planName ? find(list.filter((w) => (w.title || '') === planName)) : null) || find(list) || [];
+  }
+
+  const caliCell = (ex, s) => (s ? (ex.mode === 'hold' ? `${s.s} s` : String(s.r)) : '');
+  const caliNameList = () => `<datalist id="ex-names">${Cali.all.map((e) => `<option value="${esc(e.name)}">`).join('')}</datalist>`;
+
+  // Bestwerte: meiste Wiederholungen in einem Satz, längste Haltezeit
+  function bestCali() {
+    const best = {};
+    data.workouts().filter((w) => w.type === 'calisthenics').forEach((w) => w.exercises.forEach((ex) => ex.sets.forEach((s) => {
+      const val = ex.mode === 'hold' ? s.s : s.r;
+      const key = ex.name.toLowerCase();
+      if (!best[key] || val > best[key].val) best[key] = { name: ex.name, hold: ex.mode === 'hold', val, date: w.date };
+    })));
+    return Object.values(best).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  }
+
   function bestLifts() {
     const best = {};
-    data.workouts().forEach((w) => w.exercises.forEach((ex) => ex.sets.forEach((s) => {
+    data.workouts().filter((w) => w.type !== 'calisthenics').forEach((w) => w.exercises.forEach((ex) => ex.sets.forEach((s) => {
       const key = ex.name.toLowerCase();
       const e = Calc.e1rm(s.w, s.r);
       if (!best[key] || e > best[key].e1rm) best[key] = { name: ex.name, e1rm: e, w: s.w, r: s.r, date: w.date };
@@ -735,6 +772,13 @@
       <tbody>${w.exercises.map((ex) => `<tr><td>${esc(ex.name)}</td>${Array.from({ length: cols }, (_, i) => `<td>${ex.sets[i] ? setText(ex.sets[i]) : ''}</td>`).join('')}</tr>`).join('')}</tbody>
     </table></div>`;
   }
+
+  // Symbole für die drei Trainingsarten (Linien-Stil wie in Apple Fitness)
+  const TRAIN_ICONS = {
+    strength: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>',
+    cali: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 4h17"/><path d="M8.5 4v3.5M15.5 4v3.5"/><circle cx="12" cy="10.5" r="1.8"/><path d="M12 12.5v4M12 16.5l-2.5 4M12 16.5l2.5 4"/></svg>',
+    cardio: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="15" cy="4.5" r="2"/><path d="M13 9l-3.5 2.5L11 14l-2 6M13 9l3 3 3 .5M11 14l3.5 2 1 4.5"/></svg>',
+  };
 
   // Symbole für die Cardio-Aktivitäten (Linien-Stil wie in Apple Fitness)
   const CARDIO_ICONS = {
@@ -762,8 +806,31 @@
     </section>`;
   }
 
+  // Calisthenics-Tabelle: ein Feld pro Satz, Zahl oder „30 s“ bei Haltezeiten
+  function caliTable(w) {
+    const cols = maxSets(w);
+    return `<div class="tscroll"><table class="ttable">
+      <thead><tr><th>Übung</th>${Array.from({ length: cols }, (_, i) => `<th>Satz ${i + 1}</th>`).join('')}</tr></thead>
+      <tbody>${w.exercises.map((ex) => `<tr><td>${esc(ex.name)}</td>${Array.from({ length: cols }, (_, i) => `<td>${caliCell(ex, ex.sets[i])}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  function caliCard(w) {
+    const reps = w.exercises.reduce((t, ex) => t + (ex.mode === 'hold' ? 0 : ex.sets.reduce((s, x) => s + (x.r || 0), 0)), 0);
+    const hold = w.exercises.reduce((t, ex) => t + (ex.mode === 'hold' ? ex.sets.reduce((s, x) => s + (x.s || 0), 0) : 0), 0);
+    return `<section class="card tcard">
+      <div class="line">
+        <div><b>${esc(w.title || 'Calisthenics')}</b> <span class="muted small">${trainDateLabel(w.date)}</span></div>
+        <button class="linkish" data-action="t-edit" data-id="${w.id}">Ändern</button>
+      </div>
+      ${caliTable(w)}
+      <p class="muted small">${[reps ? `${fmt(reps)} Wiederholungen` : '', hold ? `${fmt(hold)} s Haltezeit` : ''].filter(Boolean).join(' · ')}</p>
+    </section>`;
+  }
+
   function workoutCard(w) {
     if (w.type === 'cardio') return cardioCard(w);
+    if (w.type === 'calisthenics') return caliCard(w);
     const volume = w.exercises.reduce((t, ex) => t + ex.sets.reduce((s, x) => s + x.w * x.r, 0), 0);
     return `<section class="card tcard">
       <div class="line">
@@ -794,10 +861,12 @@
     const recent = all.filter((w) => w.date >= olderCutoff());
     const olderCount = all.length - recent.length;
     const lifts = bestLifts();
+    const bestCaliList = bestCali();
     return `
-      <div class="grid2 newrow">
-        <button class="primary" data-action="t-new">+ Kraft</button>
-        <button class="primary alt" data-action="c-new">+ Cardio</button>
+      <div class="newtiles">
+        <button class="ntile" data-action="t-new"><span class="act-icon">${TRAIN_ICONS.strength}</span><span>Kraft</span></button>
+        <button class="ntile" data-action="ca-new"><span class="act-icon">${TRAIN_ICONS.cali}</span><span>Calisthenics</span></button>
+        <button class="ntile" data-action="c-new"><span class="act-icon">${TRAIN_ICONS.cardio}</span><span>Cardio</span></button>
       </div>
       <h2 class="sub">Letzte 7 Tage</h2>
       ${recent.length ? recent.map(workoutCard).join('') : '<p class="muted small">Keine Trainings in den letzten 7 Tagen.</p>'}
@@ -813,6 +882,12 @@
         ${lifts.length ? `<ul class="list">${lifts.map((l) => `<li><div class="grow"><b>${esc(l.name)}</b>
           <small class="muted">${fmtW(l.w)} kg × ${l.r} · ${l.date}</small></div><span>${fmt(l.e1rm, 1)} kg</span></li>`).join('')}</ul>`
     : '<p class="muted small">Noch keine Sätze erfasst.</p>'}
+      </details>
+      <details class="card">
+        <summary>Bestwerte Calisthenics</summary>
+        ${bestCaliList.length ? `<ul class="list">${bestCaliList.map((b) => `<li><div class="grow"><b>${esc(b.name)}</b>
+          <small class="muted">${b.date}</small></div><span>${b.hold ? `${fmt(b.val)} s` : `${fmt(b.val)} Wdh.`}</span></li>`).join('')}</ul>`
+    : '<p class="muted small">Noch keine Calisthenics-Sätze erfasst.</p>'}
       </details>`;
   }
 
@@ -823,7 +898,7 @@
     return `
       <button class="primary wide" data-action="p-new">+ Neuer Plan</button>
       ${plans.length ? plans.map((p) => `<section class="card tcard">
-        <div class="line"><b>${esc(p.name)}</b><button class="linkish" data-action="p-edit" data-id="${p.id}">Ändern</button></div>
+        <div class="line"><div><b>${esc(p.name)}</b> <span class="badge">${p.type === 'calisthenics' ? 'Calisthenics' : 'Kraft'}</span></div><button class="linkish" data-action="p-edit" data-id="${p.id}">Ändern</button></div>
         <p class="muted small">${p.exercises.length ? p.exercises.map(esc).join(' · ') : 'Keine Übungen'}</p>
         <button class="ghost" data-action="t-from-plan" data-id="${p.id}">Training mit diesem Plan starten</button>
       </section>`).join('')
@@ -845,10 +920,31 @@
     type: 'cardio', id: null, date, activity: 'run', minutes: '', dist: '', intensity: 'mid',
   });
 
+  // Calisthenics: jede Zeile hat eine Übung, eine Erfassungsart (reps oder hold) und die Sätze als Zahlen
+  function newCaliDraft(date, plan) {
+    return {
+      type: 'calisthenics', id: null, date, planId: plan ? plan.id : '', planName: plan ? plan.name : '', setCount: 3,
+      rows: plan && plan.exercises.length
+        ? plan.exercises.map((name) => ({ name, mode: caliMode(name), sets: ['', '', ''] }))
+        : [],
+    };
+  }
+
   function openTrainEditor(w, plan) {
     state.draft = null;
     state.pdraft = null;
-    if (w && w.type === 'cardio') {
+    if (w && w.type === 'calisthenics') {
+      const cols = maxSets(w);
+      state.tdraft = {
+        type: 'calisthenics', id: w.id, date: w.date, planId: w.planId || '', planName: w.title || '', setCount: cols,
+        rows: w.exercises.map((ex) => ({
+          name: ex.name, mode: ex.mode === 'hold' ? 'hold' : 'reps',
+          sets: Array.from({ length: cols }, (_, i) => (ex.sets[i] ? String(ex.mode === 'hold' ? ex.sets[i].s : ex.sets[i].r) : '')),
+        })),
+      };
+    } else if (!w && plan && plan.type === 'calisthenics') {
+      state.tdraft = newCaliDraft(todayStr(), plan);
+    } else if (w && w.type === 'cardio') {
       const swim = w.activity === 'swim';
       state.tdraft = {
         type: 'cardio', id: w.id, date: w.date, activity: w.activity, minutes: String(w.minutes || ''),
@@ -868,9 +964,10 @@
     renderEditor();
   }
 
-  // Umschalter Kraft/Cardio oben im Editor (nur beim Neuanlegen)
+  // Umschalter Kraft/Calisthenics/Cardio oben im Editor (nur beim Neuanlegen)
   const typeSeg = (current) => `<div class="seg">
     <button class="${current === 'strength' ? 'on' : ''}" data-action="t-type" data-v="strength">Kraft</button>
+    <button class="${current === 'calisthenics' ? 'on' : ''}" data-action="t-type" data-v="calisthenics">Calisthenics</button>
     <button class="${current === 'cardio' ? 'on' : ''}" data-action="t-type" data-v="cardio">Cardio</button>
   </div>`;
 
@@ -981,15 +1078,133 @@
     if (dt && dt.value) d.date = dt.value;
     d.rows = [...document.querySelectorAll('#editor [data-trow]')].map((tr) => ({
       name: tr.querySelector('[data-tname]').value,
+      ...(d.type === 'calisthenics' ? { mode: tr.dataset.mode === 'hold' ? 'hold' : 'reps' } : {}),
       sets: [...tr.querySelectorAll('[data-tset]')].map((i) => i.value),
     }));
+  }
+
+  // ---------- Calisthenics-Editor ----------
+
+  function renderCaliEditor(host) {
+    const d = state.tdraft;
+    const keep = host.querySelector('.page-body') ? host.querySelector('.page-body').scrollTop : 0;
+    const plans = data.plans().filter((p) => p.type === 'calisthenics');
+    const rows = d.rows.map((r, i) => {
+      const last = caliLast(r.name, d.planName);
+      const hold = r.mode === 'hold';
+      return `<tr data-trow data-mode="${r.mode}">
+        <td><input data-tname list="ex-names" value="${esc(r.name)}" placeholder="Übung" autocomplete="off" aria-label="Übung" data-change="tname">
+          <button type="button" class="modebtn" data-action="ca-mode" data-i="${i}" aria-label="Wiederholungen oder Sekunden umschalten">${hold ? 'Sekunden' : 'Wiederholungen'}</button></td>
+        ${Array.from({ length: d.setCount }, (_, j) => `<td><input data-tset class="setin" inputmode="numeric" value="${esc(r.sets[j] || '')}"
+          placeholder="${last[j] ? esc(String(last[j])) : (hold ? '30' : '10')}" autocomplete="off" aria-label="Satz ${j + 1}"></td>`).join('')}
+        <td><button class="icon danger" data-action="t-del-ex" data-i="${i}" aria-label="Übung entfernen">×</button></td>
+      </tr>`;
+    }).join('');
+    host.innerHTML = `
+      <div class="page-head">
+        <button class="linkish" data-action="train-close">Abbrechen</button>
+        <b>${d.id ? 'Calisthenics ändern' : 'Calisthenics eintragen'}</b>
+        <button class="linkish strong" data-action="train-save">Speichern</button>
+      </div>
+      <div class="page-body">
+        ${d.id ? '' : typeSeg('calisthenics')}
+        <section class="card">
+          <div class="grid2">
+            ${field('Datum', `<input id="t-date" type="date" value="${d.date}">`)}
+            ${field('Plan', `<select id="t-plan" data-change="t-plan">
+              <option value="">Kein Plan</option>
+              ${plans.map((p) => `<option value="${p.id}" ${p.id === d.planId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+            </select>`)}
+          </div>
+        </section>
+        <section class="card">
+          ${d.rows.length ? `<div class="tscroll"><table class="ttable edit">
+            <thead><tr><th>Übung</th>${Array.from({ length: d.setCount }, (_, j) => `<th>Satz ${j + 1}</th>`).join('')}<th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table></div>` : '<p class="muted small">Noch keine Übung. Tippe auf „+ Übung“ und wähle aus der Liste.</p>'}
+          <div class="row tbtns">
+            <button class="ghost" data-action="t-add-ex">+ Übung</button>
+            <button class="ghost" data-action="t-add-set">+ Satz</button>
+            ${d.setCount > 1 ? '<button class="ghost" data-action="t-del-set">− Satz</button>' : ''}
+          </div>
+          <p class="hint">Pro Satz nur die Zahl: Wiederholungen oder bei Halteübungen die Sekunden. Mit dem kleinen Knopf unter dem Namen schaltest du zwischen beidem um. Nicht gemachte Sätze leer lassen. Grau siehst du, was du beim letzten Mal gemacht hast.</p>
+        </section>
+        <button class="ghost" data-action="t-save-plan">Diese Übungen als Plan speichern</button>
+        ${d.id ? '<button class="ghost danger-btn" data-action="t-delete">Training löschen</button>' : ''}
+        ${caliNameList()}
+      </div>`;
+    host.hidden = false;
+    host.querySelector('.page-body').scrollTop = keep;
+  }
+
+  function saveCali() {
+    syncTDraft();
+    const d = state.tdraft;
+    if (!d.date) return toast('Bitte ein Datum wählen.');
+    const exercises = [];
+    for (let i = 0; i < d.rows.length; i += 1) {
+      const r = d.rows[i];
+      const name = r.name.trim();
+      const sets = [];
+      for (let j = 0; j < r.sets.length; j += 1) {
+        const txt = String(r.sets[j]).trim().replace(/\s*(s|sek\.?|sekunden)$/i, '');
+        if (!txt) continue;
+        if (!/^\d+$/.test(txt) || Number(txt) <= 0) return toast(`„${r.sets[j]}“ bei ${name || 'Übung ' + (i + 1)} nicht lesbar. Bitte nur eine ganze Zahl eintragen.`);
+        sets.push(r.mode === 'hold' ? { s: Number(txt) } : { r: Number(txt) });
+      }
+      if (!name && !sets.length) continue;
+      if (!name) return toast('Bitte jeder Übung mit Sätzen einen Namen geben.');
+      if (sets.length) exercises.push({ name, mode: r.mode, sets });
+    }
+    if (!exercises.length) return toast('Trage mindestens eine Übung mit einem Satz ein.');
+    const plan = data.plans().find((p) => p.id === d.planId);
+    const workout = {
+      id: d.id || 'w' + uid(), date: d.date, type: 'calisthenics', title: plan ? plan.name : d.planName, planId: d.planId || '', exercises,
+    };
+    const list = data.workouts();
+    const idx = list.findIndex((x) => x.id === workout.id);
+    if (idx >= 0) list[idx] = workout;
+    else list.push(workout);
+    Store.set('workouts', list);
+    state.tdraft = null;
+    renderEditor();
+    toast('Training gespeichert.');
+    render();
+  }
+
+  // Auswahl der Übungen aus der Liste (nach Bewegungsmuster), mit Suche und eigener Übung
+  function caliPickerList(q) {
+    const query = q.trim().toLowerCase();
+    const used = new Set(state.tdraft.rows.map((r) => r.name.trim().toLowerCase()));
+    const html = Cali.GROUPS.map(([group, list]) => {
+      const items = list.filter(([name]) => !query || name.toLowerCase().includes(query));
+      if (!items.length) return '';
+      return `<h2 class="sub">${group}</h2><ul class="list pick">${items.map(([name, mode]) => `<li>
+        <button class="pickbtn" data-action="ca-pick" data-name="${esc(name)}" data-mode="${mode}">
+          <b>${esc(name)}</b><small class="muted">${mode === 'hold' ? 'Haltezeit in Sekunden' : 'Wiederholungen'}${used.has(name.toLowerCase()) ? ' · schon im Training' : ''}</small></button></li>`).join('')}</ul>`;
+    }).join('');
+    return html || '<p class="muted small empty">Nichts gefunden. Unten kannst du eine eigene Übung anlegen.</p>';
+  }
+
+  function openCaliPicker() {
+    openDialog(`<div class="line"><h2>Übung wählen</h2><button class="linkish" data-action="close-dialog">Fertig</button></div>
+      <input type="search" placeholder="Suchen" autocomplete="off" data-input="caq" aria-label="Übung suchen">
+      <div id="ca-list" class="dlg-scroll">${caliPickerList('')}</div>
+      <form data-form="ca-custom" class="stack">
+        <h2 class="sub">Eigene Übung</h2>
+        <input name="name" placeholder="Name, z. B. Archer-Klimmzüge" required autocomplete="off" aria-label="Name der Übung">
+        <div class="seg"><button type="button" class="on" data-action="ca-custom-mode" data-v="reps">Wiederholungen</button><button type="button" data-action="ca-custom-mode" data-v="hold">Sekunden</button></div>
+        <input type="hidden" name="mode" value="reps">
+        <button class="primary wide">Hinzufügen</button>
+      </form>`);
   }
 
   function renderTrainEditor(host) {
     const d = state.tdraft;
     if (d.type === 'cardio') return renderCardioEditor(host);
+    if (d.type === 'calisthenics') return renderCaliEditor(host);
     const keep = host.querySelector('.page-body') ? host.querySelector('.page-body').scrollTop : 0;
-    const plans = data.plans();
+    const plans = data.plans().filter((p) => (p.type || 'strength') === 'strength');
     const rows = d.rows.map((r, i) => {
       const last = lastSets(r.name, d.planName) || [];
       return `<tr data-trow>
@@ -1038,6 +1253,7 @@
 
   function saveTraining() {
     if (state.tdraft.type === 'cardio') return saveCardio();
+    if (state.tdraft.type === 'calisthenics') return saveCali();
     syncTDraft();
     const d = state.tdraft;
     if (!d.date) return toast('Bitte ein Datum wählen.');
@@ -1077,8 +1293,8 @@
     state.draft = null;
     state.tdraft = null;
     state.pdraft = plan
-      ? { id: plan.id, name: plan.name, exercises: [...plan.exercises] }
-      : { id: null, name: '', exercises: [''] };
+      ? { id: plan.id, type: plan.type || 'strength', name: plan.name, exercises: [...plan.exercises] }
+      : { id: null, type: 'strength', name: '', exercises: [''] };
     renderEditor();
   }
 
@@ -1100,8 +1316,12 @@
         <button class="linkish strong" data-action="p-save">Speichern</button>
       </div>
       <div class="page-body">
+        ${d.id ? '' : `<div class="seg">
+          <button class="${d.type === 'strength' ? 'on' : ''}" data-action="p-type" data-v="strength">Kraft</button>
+          <button class="${d.type === 'calisthenics' ? 'on' : ''}" data-action="p-type" data-v="calisthenics">Calisthenics</button>
+        </div>`}
         <section class="card">
-          ${field('Name des Plans', `<input id="p-name" value="${esc(d.name)}" placeholder="z. B. Push A" autocomplete="off">`)}
+          ${field('Name des Plans', `<input id="p-name" value="${esc(d.name)}" placeholder="${d.type === 'calisthenics' ? 'z. B. Pull-Tag' : 'z. B. Push A'}" autocomplete="off">`)}
           <h2 class="sub">Übungen in der Reihenfolge</h2>
           <ul class="list">${d.exercises.map((ex, i) => `<li>
             <input data-pex list="ex-names" class="grow-input" value="${esc(ex)}" placeholder="Übung" autocomplete="off" aria-label="Übung ${i + 1}">
@@ -1112,7 +1332,7 @@
           <button class="ghost" data-action="p-add-ex">+ Übung</button>
         </section>
         ${d.id ? '<button class="ghost danger-btn" data-action="p-delete">Plan löschen</button>' : ''}
-        ${nameList()}
+        ${d.type === 'calisthenics' ? caliNameList() : nameList()}
       </div>`;
     host.hidden = false;
     host.querySelector('.page-body').scrollTop = keep;
@@ -1125,7 +1345,7 @@
     const exercises = d.exercises.map((e) => e.trim()).filter(Boolean);
     if (!name) return toast('Bitte dem Plan einen Namen geben.');
     if (!exercises.length) return toast('Füge mindestens eine Übung hinzu.');
-    const plan = { id: d.id || 'pl' + uid(), name, exercises };
+    const plan = { id: d.id || 'pl' + uid(), type: d.type || 'strength', name, exercises };
     const list = data.plans();
     const idx = list.findIndex((x) => x.id === plan.id);
     if (idx >= 0) list[idx] = plan;
@@ -1164,7 +1384,7 @@
     ? row('Wasser', s.avg.water, g.water, 'ml')
     : '<div class="line"><span>Wasser</span><span class="muted">nichts eingetragen</span></div>'}
         <div class="line"><span>Gewichtstrend</span><span>${trend}</span></div>
-        <div class="line"><span>Krafttrainings</span><span>${s.sessions}</span></div>
+        <div class="line"><span>Kraft und Calisthenics</span><span>${s.sessions}</span></div>
         <div class="line"><span>Cardio</span><span>${s.cardio.count
     ? `${s.cardio.count}× · ${fmt(s.cardio.minutes)} min${s.cardio.km ? ` · ${fmt(s.cardio.km, 1)} km` : ''} · ${fmt(s.cardio.kcal)} kcal`
     : '<span class="muted">nichts eingetragen</span>'}</span></div>
@@ -1436,6 +1656,7 @@
     $('#view').innerHTML = `<h1 class="large-title">${esc(v.title)}</h1>${v.render()}`;
     updateSubbar();
     maybeStreakToast();
+    refreshMealWindow();
   }
 
   // ---------- Overlays: Auswahl, Dialog, Editor, Meldungen ----------
@@ -1453,8 +1674,8 @@
     toastTimer = setTimeout(() => { $('#toast').hidden = true; }, label ? 6000 : 3200);
   }
 
-  function openModal(html) {
-    $('#modal').innerHTML = `<div class="backdrop" data-action="close-modal"></div><div class="sheet">${html}</div>`;
+  function openModal(html, cls = '') {
+    $('#modal').innerHTML = `<div class="backdrop" data-action="close-modal"></div><div class="sheet ${cls}">${html}</div>`;
     $('#modal').hidden = false;
   }
 
@@ -1496,6 +1717,98 @@
   const pickerTitle = (p) => ({
     meal: mealLabel(p.meal), draft: 'Zutat hinzufügen', swap: 'Ersetzen durch',
   }[p.target] || 'Lebensmittel');
+
+  // ---------- Mahlzeiten-Fenster ----------
+  // Oben vier Knöpfe (Lebensmittel, Gericht, KI-Foto, Barcode), darunter zuerst die Einträge dieser Mahlzeit.
+  // Ein Tipp auf einen Knopf zeigt die jeweilige Auswahl, ein zweiter Tipp führt zurück zu den Einträgen.
+
+  const MW_ICONS = {
+    food: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7.5C10 5.5 5.5 6.5 5.5 11.5c0 4 3 9 6.5 9s6.5-5 6.5-9c0-5-4.5-6-6.5-4z"/><path d="M12 7.5c0-2 1-3.8 3-4.5"/></svg>',
+    dish: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h18a9 9 0 0 1-18 0z"/><path d="M8 21h8M12 12V9M9 12V10.5M15 12V10.5"/></svg>',
+    ai: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3.5l1.9 5.1 5.1 1.9-5.1 1.9-1.9 5.1-1.9-5.1L4 10.5l5.1-1.9z"/><path d="M19 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>',
+    scan: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M8 9v6M11 9v6M14 9v6M17 9v6"/></svg>',
+  };
+
+  const mealTotalsText = (meal) => {
+    const t = sumEntries(mealEntries(meal));
+    return `${fmt(t.kcal)} kcal · E ${fmt(t.p)} · F ${fmt(t.f)} · KH ${fmt(t.c)}`;
+  };
+
+  // Einträge dieser Mahlzeit mit Menge, Ersetzen und Löschen
+  function mealEntriesHtml(meal) {
+    const list = mealEntries(meal);
+    const yesterday = data.day(addDays(state.date, -1)).entries.filter((e) => e.meal === meal);
+    return `${list.length
+    ? `<ul class="list">${list.map(entryRow).join('')}</ul>`
+    : '<p class="muted small empty">Noch nichts eingetragen. Wähle oben, wie du etwas hinzufügst.</p>'}
+      <div class="minor">
+        ${list.length && !mealIsDish(list) ? `<button class="linkish" data-action="meal-save" data-meal="${meal}">Als Gericht speichern</button>` : ''}
+        ${!list.length && yesterday.length ? `<button class="linkish" data-action="meal-copy" data-meal="${meal}">Von gestern übernehmen</button>` : ''}
+      </div>`;
+  }
+
+  const newPhotoState = (meal) => ({ meal, mode: 'items', busy: false, error: '', result: null });
+
+  // Ist im Mahlzeiten-Fenster gerade die Kamera für den Barcode zu sehen?
+  const isScanShown = (p) => p.view === 'scan' || (p.window && p.tab === 'scan' && p.view === 'list');
+
+  function openMeal(meal, opts = {}) {
+    state.photo = null;
+    state.picker = {
+      target: 'meal', window: true, meal, tab: opts.tab || 'entries', view: 'list',
+      ls: { foods: newLs('food'), dishes: opts.allDishes ? { q: '', filter: 'all', limit: 30 } : newLs('dish') },
+      food: null, dishId: null, ean: '', error: '', added: '',
+    };
+    renderMealWindow(state.picker);
+  }
+
+  function windowBody(p) {
+    if (p.view !== 'list') return pickerBody(p); // Menge, Gericht, neues Lebensmittel, Info, nicht gefunden
+    if (p.tab === 'entries') return `<div id="mw-entries">${mealEntriesHtml(p.meal)}</div>`;
+    if (p.tab === 'photo') {
+      if (!state.photo) state.photo = newPhotoState(p.meal);
+      return photoBody(state.photo);
+    }
+    if (p.tab === 'scan') return scanBody(false);
+    return pickerBody(p); // Lebensmittel- oder Gerichteliste
+  }
+
+  function renderMealWindow(p) {
+    Scanner.stop();
+    const tabs = [['foods', 'Lebensmittel', MW_ICONS.food], ['dishes', 'Gericht', MW_ICONS.dish],
+      ['photo', 'KI-Foto', MW_ICONS.ai], ['scan', 'Barcode', MW_ICONS.scan]];
+    openModal(`
+      <div class="mw-head">
+        <div class="grow"><h2>${esc(mealLabel(p.meal))}</h2><small class="muted" id="mw-totals">${mealTotalsText(p.meal)}</small></div>
+        <button class="linkish" data-action="close-modal">Fertig</button>
+      </div>
+      <div class="mw-tabs">${tabs.map(([k, l, icon]) => `<button class="mw-tab ${p.tab === k ? 'on' : ''}" data-action="win-tab" data-v="${k}">${icon}<span>${l}</span></button>`).join('')}</div>
+      ${p.added ? `<div class="note">${esc(p.added)}</div>` : ''}
+      <div id="mw-body">${windowBody(p)}</div>`, 'tall');
+    afterPickerRender(p);
+  }
+
+  // Hält Summe und Einträge im offenen Mahlzeiten-Fenster aktuell, ohne das Fenster neu aufzubauen
+  function refreshMealWindow() {
+    const p = state.picker;
+    if (!p || !p.window || $('#modal').hidden) return;
+    const tot = $('#mw-totals');
+    if (tot) tot.textContent = mealTotalsText(p.meal);
+    const box = $('#mw-entries');
+    if (box) box.innerHTML = mealEntriesHtml(p.meal);
+  }
+
+  // Zurück zu den Einträgen der Mahlzeit, z. B. nach dem Eintragen aus dem Foto
+  function backToEntries() {
+    const p = state.picker;
+    state.photo = null;
+    if (p && p.window) {
+      Object.assign(p, { tab: 'entries', view: 'list', food: null, dishId: null, error: '', added: '' });
+      renderMealWindow(p);
+    } else {
+      closeModal();
+    }
+  }
 
   function customForm(kind, food, ean, extra = '', label = 'Speichern') {
     const f = food || {};
@@ -1563,6 +1876,17 @@
   const amountChips = (p) => (p.unit === 'pc' ? [1, 2, 3, 4, 6] : [50, 100, 150, 200])
     .map((v) => `<button type="button" class="chip" data-action="amount-set" data-v="${v}">${v}${p.unit === 'pc' ? ' Stück' : ' g'}</button>`).join('');
 
+  // Kamera zum Scannen mit Feld für die manuelle Eingabe der Nummer
+  function scanBody(withBack) {
+    return `${withBack ? '<button type="button" class="linkish left" data-action="pk-back">‹ Zurück</button>' : ''}
+      <div class="scanbox"><video id="scan-video" playsinline muted autoplay></video><div class="scanline"></div></div>
+      <p class="hint" id="scan-status">Kamera wird gestartet …</p>
+      <form data-form="ean" class="row">
+        <input name="ean" inputmode="numeric" pattern="[0-9]{8,14}" placeholder="Nummer manuell eingeben" required aria-label="Barcode-Nummer">
+        <button class="primary">Suchen</button>
+      </form>`;
+  }
+
   function pickerBody(p) {
     if (p.view === 'amount' && p.food) {
       const f = p.food;
@@ -1616,31 +1940,23 @@
         <p class="hint">Daten: Open Food Facts (ODbL)</p>
       </form>`;
     }
-    if (p.view === 'scan') {
-      return `<button type="button" class="linkish left" data-action="pk-back">‹ Zurück</button>
-        <div class="scanbox"><video id="scan-video" playsinline muted autoplay></video><div class="scanline"></div></div>
-        <p class="hint" id="scan-status">Kamera wird gestartet …</p>
-        <form data-form="ean" class="row">
-          <input name="ean" inputmode="numeric" pattern="[0-9]{8,14}" placeholder="Nummer manuell eingeben" required aria-label="Barcode-Nummer">
-          <button class="primary">Suchen</button>
-        </form>`;
-    }
+    if (p.view === 'scan') return scanBody(true);
     if (p.view === 'notfound') {
       return `<button type="button" class="linkish left" data-action="pk-back">‹ Zurück</button>
         <div class="note warn">${p.error ? esc(p.error) + ' ' : ''}Barcode ${esc(p.ean)} wurde nicht gefunden. Du kannst das Produkt selbst anlegen.</div>
         <button class="primary wide" data-action="pk-new">Von Hand anlegen</button>`;
     }
 
-    // Liste
+    // Liste. Im Mahlzeiten-Fenster wählen die vier Knöpfe oben die Art, dort entfallen Umschalter und Scan-Knopf.
     const kind = p.tab === 'foods' ? 'food' : 'dish';
     const ls = p.ls[p.tab];
     const tabs = [['foods', 'Lebensmittel']];
     if (p.target !== 'draft') tabs.push(['dishes', 'Gerichte']);
     return `
-      ${tabs.length > 1 ? `<div class="seg">${tabs.map(([k, l]) => `<button class="${p.tab === k ? 'on' : ''}" data-action="pk-tab" data-v="${k}">${l}</button>`).join('')}</div>` : ''}
+      ${tabs.length > 1 && !p.window ? `<div class="seg">${tabs.map(([k, l]) => `<button class="${p.tab === k ? 'on' : ''}" data-action="pk-tab" data-v="${k}">${l}</button>`).join('')}</div>` : ''}
       <div class="row search-row">
         <input id="pk-q" type="search" placeholder="Suchen" autocomplete="off" value="${esc(ls.q)}" data-input="q" data-scope="picker" aria-label="Suche">
-        ${kind === 'food' ? '<button data-action="pk-scan">Scan</button>' : ''}
+        ${kind === 'food' && !p.window ? '<button data-action="pk-scan">Scan</button>' : ''}
       </div>
       ${chipsHtml(kind, ls, 'picker')}
       <div id="list-picker">${listHtml(kind, ls, 'picker')}</div>
@@ -1656,20 +1972,26 @@
       </details>` : ''}`;
   }
 
-  function renderPicker() {
-    const p = state.picker;
-    if (!p) return;
-    Scanner.stop();
-    openModal(`
-      <div class="line"><h2>${pickerTitle(p)}</h2><button class="linkish" data-action="close-modal">Fertig</button></div>
-      ${p.added ? `<div class="note">${esc(p.added)}</div>` : ''}
-      ${pickerBody(p)}`);
-    if (p.view === 'scan') startScan();
+  // Kamera starten und Mengenfeld vorbereiten, je nachdem was gerade zu sehen ist
+  function afterPickerRender(p) {
+    if (isScanShown(p)) startScan();
     if (p.view === 'amount' || p.view === 'dish') {
       renderAmountPreview();
       const input = $('#amount');
       if (input) { input.focus(); input.select(); }
     }
+  }
+
+  function renderPicker() {
+    const p = state.picker;
+    if (!p) return;
+    if (p.window) return renderMealWindow(p);
+    Scanner.stop();
+    openModal(`
+      <div class="line"><h2>${pickerTitle(p)}</h2><button class="linkish" data-action="close-modal">Fertig</button></div>
+      ${p.added ? `<div class="note">${esc(p.added)}</div>` : ''}
+      ${pickerBody(p)}`);
+    return afterPickerRender(p);
   }
 
   // Gewicht pro Stück: aus dem Feld, falls vorhanden, sonst aus dem Lebensmittel
@@ -1729,7 +2051,11 @@
       Object.assign(p, { view: 'list', food: null, dishId: null, added: `✓ ${label} eingetragen` });
       return renderPicker();
     }
-    return closeModal();
+    // Im Mahlzeiten-Fenster geht es zurück zu den Einträgen. Beim Ersetzen öffnet sich das Fenster wieder.
+    if (p.window) return backToEntries();
+    const back = p.back;
+    closeModal();
+    return back ? openMeal(back) : undefined;
   }
 
   // Ersetzt Lebensmittel und Menge eines Eintrags, Mahlzeit und Kennung bleiben
@@ -1763,7 +2089,7 @@
     if (!video) return;
     try {
       await Scanner.start(video, (ean) => { Scanner.stop(); findProduct(ean); });
-      if (!state.picker || state.picker.view !== 'scan') return Scanner.stop();
+      if (!state.picker || !isScanShown(state.picker)) return Scanner.stop();
       setScanStatus('Halte den Barcode ins Bild.');
     } catch (err) {
       setScanStatus(cameraMessage(err));
@@ -1891,22 +2217,15 @@
     toast('Gericht gespeichert.');
     const back = state.editorReturn;
     state.editorReturn = null;
-    if (back) {
-      // Das neue Gericht ist noch nie benutzt, deshalb „Alle“ statt „Zuletzt“ zeigen
-      openPicker({
-        target: 'meal', meal: back, tab: 'dishes',
-        ls: { foods: newLs('food'), dishes: { q: '', filter: 'all', limit: 30 } },
-      });
-    } else {
-      render();
-    }
+    render();
+    // Das neue Gericht ist noch nie benutzt, deshalb zeigt die Liste „Alle“ statt „Zuletzt“
+    if (back) openMeal(back, { tab: 'dishes', allDishes: true });
   }
 
   // ---------- Foto-Schätzung ----------
 
-  function renderPhoto() {
-    const ph = state.photo;
-    if (!ph) return;
+  // Inhalt des Reiters „KI-Foto“ im Mahlzeiten-Fenster
+  function photoBody(ph) {
     const ai = data.ai();
     let body;
     if (!ai.key) {
@@ -1961,9 +2280,12 @@
         <label class="filebtn bigbtn">Foto aufnehmen oder wählen<input type="file" accept="image/*" data-change="photo" hidden></label>
         <p class="hint">Das Foto wird verkleinert und zur Analyse an Google gesendet. Es wird nicht gespeichert. Schätzungen weichen oft um 20 bis 30 % ab.</p>`;
     }
-    openModal(`
-      <div class="line"><h2>Foto · ${mealLabel(ph.meal)}</h2><button class="linkish" data-action="close-modal">Fertig</button></div>
-      ${body}`);
+    return body;
+  }
+
+  // Zeigt den aktuellen Stand des Foto-Reiters (Laden, Ergebnis, Fehler) im Mahlzeiten-Fenster
+  function renderPhoto() {
+    if (state.picker && state.picker.window) renderMealWindow(state.picker);
   }
 
   async function runPhoto(file) {
@@ -2211,11 +2533,26 @@
           </form>`);
 
       // Auswahl-Fenster
-      case 'open-picker':
-        return openPicker({ target: 'meal', meal: ds.meal, tab: ds.pk });
+      case 'open-meal':
+        return openMeal(ds.meal);
+      case 'win-tab': {
+        const p = state.picker;
+        // Beim Verlassen des Foto-Reiters läuft keine Schätzung weiter
+        if (p.tab === 'photo' && state.photo) {
+          if (state.photo.ctl) state.photo.ctl.abort();
+          clearInterval(state.photo.ticker);
+          state.photo = null;
+        }
+        // Ein zweiter Tipp auf den aktiven Knopf führt zurück zu den Einträgen
+        p.tab = p.tab === ds.v && p.view === 'list' ? 'entries' : ds.v;
+        Object.assign(p, { view: 'list', food: null, dishId: null, error: '', added: '' });
+        return renderMealWindow(p);
+      }
       case 'swap': {
         const e = data.day(state.date).entries.find((x) => x.id === ds.id);
-        return openPicker({ target: 'swap', entryId: ds.id, meal: e ? e.meal : null });
+        // Kommt der Tipp aus dem Mahlzeiten-Fenster, öffnet es sich nach dem Ersetzen wieder
+        const back = state.picker && state.picker.window && e ? e.meal : null;
+        return openPicker({ target: 'swap', entryId: ds.id, meal: e ? e.meal : null, back });
       }
       case 'cook-scan':
         return openPicker({ target: null, view: 'scan' });
@@ -2268,8 +2605,12 @@
       case 'fav':
         toggleFav(ds.id);
         return refreshFavButtons();
-      case 'close-modal':
-        return closeModal();
+      case 'close-modal': {
+        // Beim Abbrechen des Ersetzens geht es zurück ins Mahlzeiten-Fenster
+        const back = state.picker && state.picker.target === 'swap' ? state.picker.back : null;
+        closeModal();
+        return back ? openMeal(back) : undefined;
+      }
       case 'close-dialog':
         return closeDialog();
       // Lebensmittel im Kochbuch
@@ -2331,9 +2672,6 @@
         return render();
 
       // Foto
-      case 'photo-open':
-        state.photo = { meal: ds.meal, mode: 'items', busy: false, error: '', result: null };
-        return renderPhoto();
       case 'ph-mode':
         state.photo.mode = ds.v;
         return renderPhoto();
@@ -2352,8 +2690,8 @@
         const items = state.photo.result.items.map((it) => ({ ...it, estimated: true }));
         if (!items.length) return toast('Keine Einträge vorhanden.');
         items.forEach((it) => addEntry(state.date, state.photo.meal, it));
-        closeModal();
-        return render();
+        render();
+        return backToEntries();
       }
       case 'goto-photo-settings':
         closeModal();
@@ -2419,12 +2757,39 @@
         openTrainEditor(null, null);
         state.tdraft = newCardioDraft(todayStr());
         return renderEditor();
+      case 'ca-new':
+        openTrainEditor(null, null);
+        state.tdraft = newCaliDraft(todayStr(), null);
+        return renderEditor();
       case 't-type': {
         syncTDraft();
         const date = state.tdraft.date;
-        state.tdraft = ds.v === 'cardio' ? newCardioDraft(date) : newStrengthDraft(date, null);
+        if (ds.v === 'cardio') state.tdraft = newCardioDraft(date);
+        else if (ds.v === 'calisthenics') state.tdraft = newCaliDraft(date, null);
+        else state.tdraft = newStrengthDraft(date, null);
         return renderEditor();
       }
+      case 'ca-mode': {
+        syncTDraft();
+        const row = state.tdraft.rows[Number(ds.i)];
+        if (row) row.mode = row.mode === 'hold' ? 'reps' : 'hold';
+        return renderEditor();
+      }
+      case 'ca-pick': {
+        syncTDraft();
+        const d = state.tdraft;
+        // Eine leere Zeile ersetzen, sonst anhängen
+        const empty = d.rows.findIndex((r) => !r.name.trim() && r.sets.every((s) => !String(s).trim()));
+        const row = { name: ds.name, mode: ds.mode, sets: Array(d.setCount).fill('') };
+        if (empty >= 0) d.rows[empty] = row;
+        else d.rows.push(row);
+        closeDialog();
+        return renderEditor();
+      }
+      case 'ca-custom-mode':
+        document.querySelectorAll('[data-action="ca-custom-mode"]').forEach((b) => b.classList.toggle('on', b.dataset.v === ds.v));
+        $('#dialog [name="mode"]').value = ds.v;
+        return undefined;
       case 'c-act': {
         syncCDraft();
         const d = state.tdraft;
@@ -2462,12 +2827,15 @@
         return render();
       case 't-add-ex':
         syncTDraft();
+        if (state.tdraft.type === 'calisthenics') return openCaliPicker();
         state.tdraft.rows.push({ name: '', sets: Array(state.tdraft.setCount).fill('') });
         return renderEditor();
       case 't-del-ex':
         syncTDraft();
         state.tdraft.rows.splice(Number(ds.i), 1);
-        if (!state.tdraft.rows.length) state.tdraft.rows.push({ name: '', sets: Array(state.tdraft.setCount).fill('') });
+        if (!state.tdraft.rows.length && state.tdraft.type !== 'calisthenics') {
+          state.tdraft.rows.push({ name: '', sets: Array(state.tdraft.setCount).fill('') });
+        }
         return renderEditor();
       case 't-add-set':
         syncTDraft();
@@ -2526,6 +2894,10 @@
       // Pläne
       case 'p-new':
         return openPlanEditor(null);
+      case 'p-type':
+        syncPDraft();
+        state.pdraft.type = ds.v;
+        return renderEditor();
       case 'p-edit': {
         const plan = data.plans().find((x) => x.id === ds.id);
         return plan ? openPlanEditor(plan) : undefined;
@@ -2727,8 +3099,8 @@
           base: { kcal: n(get('kcal')), p: n(get('p')), f: n(get('f')), c: n(get('c')) },
         };
         addEntry(state.date, state.photo.meal, item);
-        closeModal();
-        return render();
+        render();
+        return backToEntries();
       }
       case 'weight': {
         const kg = n(get('kg'));
@@ -2739,6 +3111,14 @@
         Store.set('weights', list);
         toast('Gewicht gespeichert.');
         return render();
+      }
+      case 'ca-custom': {
+        const name = get('name').trim();
+        if (!name) return toast('Bitte einen Namen eingeben.');
+        const d = state.tdraft;
+        d.rows.push({ name, mode: get('mode') === 'hold' ? 'hold' : 'reps', sets: Array(d.setCount).fill('') });
+        closeDialog();
+        return renderEditor();
       }
       case 'meal-add': {
         const label = get('name').trim();
@@ -2753,7 +3133,7 @@
         // Plan aus den Übungen des gerade bearbeiteten Trainings
         const name = get('name').trim();
         const names = state.tdraft.rows.map((r) => r.name.trim()).filter(Boolean);
-        const plan = { id: 'pl' + uid(), name, exercises: names };
+        const plan = { id: 'pl' + uid(), type: state.tdraft.type === 'calisthenics' ? 'calisthenics' : 'strength', name, exercises: names };
         Store.set('plans', [...data.plans(), plan]);
         state.tdraft.planId = plan.id;
         state.tdraft.planName = plan.name;
@@ -2864,19 +3244,25 @@
       case 'tname':
         // Übung geändert: Platzhalter mit den Werten vom letzten Mal neu laden
         syncTDraft();
+        if (state.tdraft.type === 'calisthenics') {
+          // Bekannte Übungen setzen die passende Erfassungsart (Wiederholungen oder Sekunden)
+          state.tdraft.rows.forEach((r) => { const m = Cali.modeOf(r.name); if (m) r.mode = m; });
+        }
         return renderEditor();
       case 't-plan': {
         syncTDraft();
         const d = state.tdraft;
         const plan = data.plans().find((x) => x.id === el.value);
-        const hasData = d.rows.some((r) => r.sets.some((s) => s.trim()));
+        const hasData = d.rows.some((r) => r.sets.some((s) => String(s).trim()));
         if (plan && hasData && !confirm('Die Übungen werden durch den Plan ersetzt. Eingetragene Sätze gehen verloren. Fortfahren?')) {
           return renderEditor();
         }
         d.planId = plan ? plan.id : '';
         d.planName = plan ? plan.name : '';
         if (plan && plan.exercises.length) {
-          d.rows = plan.exercises.map((name) => ({ name, sets: Array(d.setCount).fill('') }));
+          d.rows = plan.exercises.map((name) => ({
+            name, ...(d.type === 'calisthenics' ? { mode: caliMode(name) } : {}), sets: Array(d.setCount).fill(''),
+          }));
         }
         return renderEditor();
       }
@@ -2914,6 +3300,7 @@
     }
     if (el.dataset.input === 'amount') renderAmountPreview();
     if (el.dataset.input === 'cardio') updateCardioPreview();
+    if (el.dataset.input === 'caq' && $('#ca-list')) $('#ca-list').innerHTML = caliPickerList(el.value);
     if (el.dataset.input === 'tq') {
       state.show.trainQ = el.value;
       state.show.trainLimit = 20;

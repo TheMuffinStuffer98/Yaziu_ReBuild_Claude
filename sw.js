@@ -1,7 +1,7 @@
 // Service Worker: hält die App-Dateien für den Offline-Betrieb bereit.
 // Online werden immer die neuesten Dateien geladen (Netz zuerst), der Zwischenspeicher dient nur als Ersatz.
 // CACHE bei jeder Veröffentlichung hochzählen und APP_VERSION in js/app.js gleich setzen.
-const CACHE = 'fitness-tagebuch-v16';
+const CACHE = 'fitness-tagebuch-v17';
 const FILES = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const FILES = [
   './js/foods.js',
   './js/parse.js',
   './js/coach.js',
+  './js/cali.js',
   './js/dishes.js',
   './js/scanner.js',
   './js/vision.js',
