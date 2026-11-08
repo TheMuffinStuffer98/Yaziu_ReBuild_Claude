@@ -321,6 +321,41 @@ details > summary { color: var(--accent); cursor: pointer; padding: 8px 0; font-
 }
 .tabbar svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .tabbar button.active { color: var(--accent); }
+/* Roter Punkt: heute ist ein geplantes Training offen */
+.tabbar button { position: relative; }
+.tabbar button.dot::after {
+  content: ''; position: absolute; top: 4px; left: calc(50% + 8px);
+  width: 9px; height: 9px; border-radius: 50%; background: var(--danger); border: 1.5px solid var(--card);
+}
+
+/* Trainingszeitplan: Karte für heute, Wochenübersicht, Editor */
+.plancard .line h2 { margin: 0; }
+.col { display: flex; flex-direction: column; min-width: 0; }
+.col small { color: var(--muted); font-size: 0.8rem; }
+.sess { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
+.sess + .sess, .sess-more + .sess { border-top: 0.5px solid var(--line); }
+.sess .grow { display: flex; flex-direction: column; min-width: 0; }
+.sess small { font-size: 0.8rem; }
+.sess.missed b { color: var(--warn); }
+.sess-more { display: flex; gap: 16px; padding: 0 0 8px; }
+.sess-more .linkish { font-size: 0.85rem; padding: 2px 0; }
+button.mini { padding: 7px 16px; font-size: 0.9rem; border-radius: 999px; width: auto; flex: none; }
+.okmark { color: var(--accent); font-weight: 600; font-size: 0.9rem; flex: none; }
+.weekrow { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 10px 0 8px; }
+.wd { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 2px; border-radius: 10px; min-width: 0; }
+.wd.today { background: var(--accent-soft); }
+.wd small { font-size: 0.7rem; color: var(--muted); }
+.wd .wl { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 1em; }
+.mk { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-size: 0.8rem; font-weight: 700; background: var(--fill); color: var(--muted); }
+.mk.done { background: var(--accent); color: #fff; }
+.mk.open { background: var(--accent-soft); color: var(--accent); }
+.mk.missed { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.schlist { margin-bottom: 10px; }
+.schrow { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; }
+.schrow .wdl { width: 5.6em; flex: none; padding-top: 10px; font-size: 0.9rem; }
+.schrow select, .schrow input[type="number"] { width: 100%; }
+.cardio-sel { margin-top: 8px; align-items: center; }
+.cardio-sel input { max-width: 5em; }
 
 /* Vollbild-Seite für Editoren */
 .page { position: fixed; inset: 0; z-index: 25; display: flex; flex-direction: column; background: var(--bg); }

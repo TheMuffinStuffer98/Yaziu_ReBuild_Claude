@@ -45,6 +45,9 @@ const Parse = (() => {
     const found = find(term, foods);
     if (!found) return { missing: term };
 
+    // Pauschale Produkte (1 Döner) zählen in Stück, nicht in Gramm
+    if (found.per === 'port') return { food: found, grams: amount === null ? 1 : Math.round(amount * 100) / 100 };
+
     let grams;
     if (amount === null) grams = found.piece || 100;
     else if (PIECE_UNITS.includes(unit)) grams = amount * (found.piece || 100);

@@ -123,6 +123,9 @@ ist ohne laufende Kosten nicht lokal machbar. Deshalb gibt es diese Varianten:
 - [x] Version v16: Das Wasser-Feld unten im Tagebuch (−250, +250, +500) ist entfernt, weil der Schnellzugriff oben in der Übersicht reicht. Zum Eintragen gibt es nur noch +250 ml am Wassertropfen. Eine Korrektur nach unten ist damit nicht mehr möglich (offen, falls gewünscht: kleiner „−“-Knopf am Tropfen)
 - [x] v17: Calisthenics als dritter Trainingstyp (js/cali.js, 36 Übungen, Wiederholungen oder Haltezeit, Pläne je Sportart, drei Trainingsknöpfe mit Symbol; Varianten nur als eigene Übungen, kein Gewicht, keine Kalorien)
 - [x] v17: Startseite mit Mahlzeiten-Zeilen, Mahlzeiten-Fenster mit vier Symbol-Tabs (Lebensmittel, Gericht, KI-Foto, Barcode) und Einträgen darunter
+- [x] v18: Pauschale Produkte (Nährwerte pro Stück/Portion statt pro 100 g, eigene Bezeichnung, Anzahl beim Eintragen) und übersichtlicheres Formular mit Umschalter
+- [x] v18: Trainingszeitplan (js/schedule.js): Wochentage oder Rotation, Cardio mit Sportart und Dauer als Vorgabe, Karte auf der Startseite, roter Punkt am Fortschritt-Tab, automatisches Abhaken, Verschieben (heute/morgen) und Überspringen, Wochenübersicht und Ziele im Coach, Kalender-Export (.ics) als Erinnerung
+- [ ] Kalender-Export (.ics) auf dem iPhone testen (Nutzer prüft, ob Safari den Import anbietet)
 - [ ] Foto-Schätzung mit echtem Schlüssel auf dem iPhone testen (Nutzer prüft, Verbindungstest unter Profil → Foto) (im Browser-Test war die Kamera gesperrt, es gab keinen Schlüssel)
 - [ ] Test auf dem iPhone in Safari (steht noch aus)
 - [ ] Hosting auf GitHub Pages (Repo ist angelegt, Pages-Einstellung noch offen)

@@ -41,7 +41,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
-  const APP_VERSION = 'v17'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v18'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -58,6 +58,7 @@
     cook: null, // Such- und Filterzustand im Kochbuch
     tdraft: null, // Training im Editor
     pdraft: null, // Trainingsplan im Editor
+    sdraft: null, // Trainingszeitplan im Editor
     show: { weightAll: false, trainOld: false, trainQ: '', trainLimit: 20 }, // eingeklappte Bereiche
   };
 
@@ -146,6 +147,7 @@
     products: () => Store.get('products', []),
     favs: () => Store.get('favs', []),
     plans: () => Store.get('plans', []),
+    schedule: () => Store.get('schedule', null),
     ai: () => ({ key: '', model: DEFAULT_MODEL, ...Store.get('ai', {}) }),
   };
 
@@ -161,12 +163,14 @@
 
   const allFoods = () => Foods.list([...data.custom(), ...data.products()]);
   // pieces = Anzahl Stück, falls die Menge in Stück angegeben wurde (grams ist dann schon umgerechnet)
+  // Pauschale Produkte (food.per === 'port') werden in Stück gezählt: grams ist dann die Anzahl, base gilt pro Stück.
   const foodItem = (food, grams, pieces) => ({
     name: food.name,
     grams,
     foodId: food.id,
     base: { kcal: food.kcal, p: food.p, f: food.f, c: food.c },
-    ...(pieces ? { pieces, pieceG: food.piece } : {}),
+    ...(food.per === 'port' ? { unit: 'port', unitName: food.unitName || '' } : {}),
+    ...(pieces && food.per !== 'port' ? { pieces, pieceG: food.piece } : {}),
   });
 
   function saveProduct(p) {
@@ -303,8 +307,8 @@
 
   const field = (label, input) => `<label class="field"><span>${label}</span>${input}</label>`;
   const macroLine = (t) => `${fmt(t.kcal)} kcal · E ${fmt(t.p)} · F ${fmt(t.f)} · KH ${fmt(t.c)}`;
-  const unitLabel = (e) => (e.unit === 'port' ? 'Port.' : 'g');
-  const amountText = (amount, unit) => (unit === 'port' ? `${fmt(amount, 2)} Port.` : `${fmt(amount)} g`);
+  const unitLabel = (e) => (e.unit === 'port' ? (e.unitName || 'Port.') : 'g');
+  const amountText = (amount, unit, name) => (unit === 'port' ? `${fmt(amount, 2)} ${name || 'Port.'}` : `${fmt(amount)} g`);
 
   // Umschalter innerhalb eines Reiters
   function seg(group, options, current) {
@@ -351,7 +355,7 @@
     if (!e.dishId) return '';
     const d = data.dishes().find((x) => x.id === e.dishId);
     if (!d) return '';
-    const parts = Dish.scaled(d, e.grams).map((i) => `${esc(i.name)} ${amountText(i.amount, i.unit)}`);
+    const parts = Dish.scaled(d, e.grams).map((i) => `${esc(i.name)} ${amountText(i.amount, i.unit, i.unitName)}`);
     return `<small class="plate">Teller: ${parts.join(' · ')}</small>`;
   }
 
@@ -502,6 +506,7 @@
           <button class="water-add" data-action="water" data-ml="250" aria-label="250 Milliliter Wasser hinzufügen">+250 ml</button>
         </div>
       </section>
+      ${state.date === todayStr() ? todayCard(true) : ''}
       <section class="card group">${mealsForDay(day.entries).map((m) => mealCard(m.key, m.label, day.entries)).join('')}</section>`;
   }
 
@@ -570,7 +575,7 @@
 
   function itemRow(kind, x, scope) {
     const sub = kind === 'food'
-      ? `${fmtK(x.kcal)} kcal · E ${fmt(x.p, 1)} · F ${fmt(x.f, 1)} · KH ${fmt(x.c, 1)} pro 100 g`
+      ? `${fmtK(x.kcal)} kcal · E ${fmt(x.p, 1)} · F ${fmt(x.f, 1)} · KH ${fmt(x.c, 1)} ${x.per === 'port' ? `pro ${esc(x.unitName || 'Portion')}` : 'pro 100 g'}`
       : `pro Portion: ${macroLine(Dish.perPortion(x))}`;
     let act;
     if (scope === 'picker') act = kind === 'food' ? 'pk-food' : 'pk-dish';
@@ -903,6 +908,336 @@
         <button class="ghost" data-action="t-from-plan" data-id="${p.id}">Training mit diesem Plan starten</button>
       </section>`).join('')
     : `<section class="card"><p class="muted small">Noch keine Pläne. Ein Plan ist die Vorlage für einen Trainingstag, zum Beispiel „Push A“ mit allen Übungen. Damit musst du die Übungen nicht jedes Mal neu eintragen.</p></section>`}`;
+  }
+
+  // ---------- Trainingszeitplan (Wochentage oder Rotation) ----------
+
+  const schedExists = (id) => data.plans().some((p) => p.id === id);
+  const WD_SHORT = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+  const WD_LONG = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+  const planOf = (slot) => data.plans().find((p) => p.id === slot.planId);
+  const planKind = (p) => (p.type === 'calisthenics' ? 'Calisthenics' : 'Kraft');
+  const slotLabel = (slot) => {
+    if (slot.kind === 'cardio') return (Calc.CARDIO[slot.activity] || { label: 'Cardio' }).label;
+    const p = planOf(slot);
+    return p ? p.name : 'Plan';
+  };
+  const slotSub = (slot) => {
+    if (slot.kind === 'cardio') return `Cardio · ca. ${fmt(slot.minutes)} min`;
+    const p = planOf(slot);
+    return p ? `${planKind(p)} · ${p.exercises.length} Übungen` : '';
+  };
+
+  function trainingOpenToday() {
+    const sc = data.schedule();
+    if (!sc) return false;
+    const t = todayStr();
+    return Schedule.dayInfo(sc, t, data.workouts(), t, schedExists).slots.some((s) => s.status === 'open');
+  }
+
+  // Ein Termin mit Knöpfen. date = Tag, an dem er angezeigt wird, from = Tag, für den er ursprünglich geplant war.
+  function sessionHtml(date, { slot, status }) {
+    const attrs = `data-date="${date}" data-from="${slot.from || date}" data-key="${esc(Schedule.keyOf(slot))}"`;
+    const right = {
+      open: `<button class="primary mini" data-action="sch-start" ${attrs}>Starten</button>`,
+      done: '<span class="okmark">✓ Erledigt</span>',
+      skip: '<span class="muted small">Übersprungen</span>',
+    }[status] || '';
+    const note = status === 'missed' ? `Verpasst am ${dateLabel(date)}` : slotSub(slot) + (slot.from && slot.from !== date ? ` · verschoben von ${dateLabel(slot.from)}` : '');
+    const more = status === 'open'
+      ? `<div class="sess-more"><button class="linkish" data-action="sch-move" data-to="tomorrow" ${attrs}>Auf morgen verschieben</button>
+          <button class="linkish" data-action="sch-skip" ${attrs}>Überspringen</button></div>`
+      : status === 'missed'
+        ? `<div class="sess-more"><button class="linkish" data-action="sch-move" data-to="today" ${attrs}>Auf heute verschieben</button>
+          <button class="linkish" data-action="sch-skip" ${attrs}>Überspringen</button></div>`
+        : '';
+    return `<div class="sess ${status}"><div class="grow"><b>${esc(slotLabel(slot))}</b><small class="muted">${esc(note)}</small></div>${right}</div>${more}`;
+  }
+
+  // Heutiges Training mit Startknopf, dazu verpasste Termine der letzten Tage. Auf der Startseite und im Coach.
+  function todayCard(compact) {
+    const sc = data.schedule();
+    if (!sc) return '';
+    const today = todayStr();
+    const wk = data.workouts();
+    const info = Schedule.dayInfo(sc, today, wk, today, schedExists);
+    const miss = Schedule.missed(sc, today, wk, schedExists, compact ? 3 : 7);
+    let body = info.slots.map((x) => sessionHtml(today, x)).join('');
+    if (!info.slots.length) {
+      const nx = Schedule.next(sc, today, wk, schedExists);
+      body = `<p class="muted small">Heute ist Ruhetag.${nx ? ` Als Nächstes: ${dateLabel(nx.date)}, ${nx.slots.map((x) => esc(slotLabel(x.slot))).join(' und ')}.` : ''}</p>`;
+    }
+    return `<section class="card plancard">
+      <div class="line"><h2>Training heute</h2>${compact ? '<button class="linkish" data-action="go-coach">Zeitplan</button>' : ''}</div>
+      ${body}${miss.map((m) => sessionHtml(m.date, { slot: m.slot, status: 'missed' })).join('')}
+    </section>`;
+  }
+
+  // Montag bis Sonntag auf einen Blick
+  function weekStrip() {
+    const today = todayStr();
+    const days = Schedule.week(data.schedule(), today, data.workouts(), schedExists);
+    const mark = { done: '✓', missed: '!', open: '●', later: '○', skip: '–' };
+    let planned = 0;
+    let did = 0;
+    const cells = days.map((d, i) => {
+      d.slots.forEach((s) => { planned += 1; if (s.status === 'done') did += 1; });
+      return `<div class="wd ${d.date === today ? 'today' : ''}"><small>${WD_SHORT[i]}</small>
+        ${d.slots.length ? d.slots.map((s) => `<span class="mk ${s.status}">${mark[s.status]}</span>`).join('') : '<span class="mk rest">·</span>'}
+        <small class="wl">${d.slots.map((s) => esc(slotLabel(s.slot))).join(', ')}</small></div>`;
+    }).join('');
+    return `<section class="card"><div class="line"><h2>Diese Woche</h2><span class="muted small">${did} von ${planned} erledigt</span></div>
+      <div class="weekrow">${cells}</div>
+      <p class="muted small">✓ erledigt · ● heute · ○ kommt noch · ! verpasst · – übersprungen</p></section>`;
+  }
+
+  // Ziele für die Übungen eines Plans, abgeleitet vom letzten Training (Doppelte Progression)
+  function planHints(plan) {
+    return plan.exercises.map((name) => {
+      if (plan.type === 'calisthenics') {
+        const last = caliLast(name, plan.name).filter((v) => v > 0);
+        if (!last.length) return { name, text: 'Noch keine Werte. Starte locker und notiere die Sätze.' };
+        const min = Math.min(...last);
+        const now = last.join(' / ');
+        if (caliMode(name) === 'hold') return { name, text: `Zuletzt ${now} s. Ziel: ${min + 5} s im schwächsten Satz.` };
+        if (min >= 15) return { name, text: `Zuletzt ${now} Wdh. Alle Sätze ab 15: probiere eine schwerere Variante.` };
+        return { name, text: `Zuletzt ${now} Wdh. Ziel: mindestens ${min + 1} im schwächsten Satz.` };
+      }
+      const sets = (lastSets(name, plan.name) || []).filter((s) => Number.isFinite(s.w) && s.r > 0);
+      if (!sets.length) return { name, text: 'Noch keine Werte. Starte locker und notiere die Sätze.' };
+      const top = Math.max(...sets.map((s) => s.w));
+      const minR = Math.min(...sets.filter((s) => s.w === top).map((s) => s.r));
+      const now = sets.map((s) => `${fmtW(s.w)}×${s.r}`).join(' / ');
+      return minR >= 12
+        ? { name, text: `Zuletzt ${now}. Alle Sätze mit ${fmtW(top)} kg ab 12 Wdh.: heute ${fmtW(top + 2.5)} kg probieren.` }
+        : { name, text: `Zuletzt ${now}. Ziel: ${fmtW(top)} kg mit mindestens ${minR + 1} Wdh. im schwächsten Satz.` };
+    });
+  }
+
+  function hintsHtml() {
+    const sc = data.schedule();
+    const today = todayStr();
+    const slots = Schedule.dayInfo(sc, today, data.workouts(), today, schedExists).slots
+      .filter((x) => x.status === 'open' && x.slot.kind === 'plan');
+    return slots.map((x) => {
+      const plan = planOf(x.slot);
+      return plan ? `<section class="card"><h2>Ziele für ${esc(plan.name)}</h2><ul class="list">${planHints(plan).map((h) => `<li>
+        <div class="grow"><b>${esc(h.name)}</b><small class="muted">${esc(h.text)}</small></div></li>`).join('')}</ul></section>` : '';
+    }).join('');
+  }
+
+  function scheduleSection() {
+    const sc = data.schedule();
+    if (!sc) {
+      return `<section class="card"><h2>Trainingsplan</h2>
+        <p class="muted small">Lege fest, welches Training an welchem Tag dran ist, zum Beispiel Tag 1 Brust, Tag 2 Cardio. Der Coach zeigt dir dann jeden Tag, was ansteht, und hakt erledigte Einheiten selbst ab.</p>
+        <button class="primary wide" data-action="sch-edit">Zeitplan einrichten</button></section>`;
+    }
+    const info = sc.mode === 'cycle' ? `Rotation über ${(sc.cycle || []).length} Tage` : 'Feste Wochentage';
+    return `${todayCard(false)}${weekStrip()}${hintsHtml()}
+      <section class="card"><div class="line"><div class="col"><b>Dein Zeitplan</b><small class="muted">${info}${sc.time ? ` · ${esc(sc.time)} Uhr` : ''}</small></div>
+        <button class="linkish" data-action="sch-edit">Ändern</button></div>
+        <button class="ghost" data-action="sch-ics">In den Kalender übernehmen (Erinnerung)</button></section>`;
+  }
+
+  // Auswahl eines Eintrags: Ruhetag/Pause, einer der Pläne oder Cardio mit Sportart und Dauer
+  function slotControl(g, i, slot) {
+    const val = !slot ? '' : slot.kind === 'cardio' ? 'cardio' : 'p:' + slot.planId;
+    const plans = data.plans();
+    let found = !slot || slot.kind === 'cardio';
+    const opts = [`<option value="" ${slot ? '' : 'selected'}>${g === 'cycle' ? 'Pause' : 'Ruhetag'}</option>`];
+    plans.forEach((p) => {
+      const sel = val === 'p:' + p.id;
+      found = found || sel;
+      opts.push(`<option value="p:${esc(p.id)}" ${sel ? 'selected' : ''}>${esc(p.name)} (${planKind(p)})</option>`);
+    });
+    if (!found) opts.push(`<option value="${esc(val)}" selected>Plan gelöscht</option>`);
+    opts.push(`<option value="cardio" ${val === 'cardio' ? 'selected' : ''}>Cardio</option>`);
+    const cardio = slot && slot.kind === 'cardio'
+      ? `<div class="row cardio-sel">
+          <select data-change="sch-act" data-g="${g}" data-i="${i}" aria-label="Sportart">${Object.entries(Calc.CARDIO).map(([k, a]) => `<option value="${k}" ${slot.activity === k ? 'selected' : ''}>${a.label}</option>`).join('')}</select>
+          <input type="number" inputmode="numeric" min="1" step="1" value="${esc(slot.minutes)}" data-change="sch-min" data-g="${g}" data-i="${i}" aria-label="Dauer in Minuten">
+          <span class="muted small">min</span></div>`
+      : '';
+    return `<select data-change="sch-slot" data-g="${g}" data-i="${i}" aria-label="Training">${opts.join('')}</select>${cardio}`;
+  }
+
+  function openScheduleEditor() {
+    state.draft = null;
+    state.tdraft = null;
+    state.pdraft = null;
+    const sc = data.schedule();
+    state.sdraft = sc
+      ? { mode: sc.mode, week: JSON.parse(JSON.stringify(sc.week || Array(7).fill(null))), cycle: JSON.parse(JSON.stringify(sc.cycle || [null, null, null])), anchor: sc.anchor || todayStr(), time: sc.time || '18:00' }
+      : { mode: 'week', week: Array(7).fill(null), cycle: [null, null, null], anchor: todayStr(), time: '18:00' };
+    renderEditor();
+  }
+
+  function syncSDraft() {
+    const d = state.sdraft;
+    if (!d) return;
+    if ($('#s-anchor') && $('#s-anchor').value) d.anchor = $('#s-anchor').value;
+    if ($('#s-time') && $('#s-time').value) d.time = $('#s-time').value;
+  }
+
+  function renderScheduleEditor(host) {
+    const d = state.sdraft;
+    const keep = host.querySelector('.page-body') ? host.querySelector('.page-body').scrollTop : 0;
+    const week = `<section class="card"><ul class="list schlist">${d.week.map((slot, i) => `<li class="schrow"><b class="wdl">${WD_LONG[i]}</b>
+        <div class="grow">${slotControl('week', i, slot)}</div></li>`).join('')}</ul></section>`;
+    const cycle = `<section class="card">
+        ${field('Tag 1 ist am', `<input id="s-anchor" type="date" value="${esc(d.anchor)}">`)}
+        <ul class="list schlist">${d.cycle.map((slot, i) => `<li class="schrow"><b class="wdl">Tag ${i + 1}</b>
+          <div class="grow">${slotControl('cycle', i, slot)}</div>
+          <button class="icon danger" data-action="sch-del-day" data-i="${i}" aria-label="Tag entfernen" ${d.cycle.length <= 1 ? 'disabled' : ''}>×</button></li>`).join('')}</ul>
+        <button class="ghost" data-action="sch-add-day">+ Tag hinzufügen</button>
+        <p class="hint">Die Tage wiederholen sich der Reihe nach, auch Pausen zählen als Tag. Fällt ein Training aus, verschiebst du es im Coach, und der Rest rutscht mit.</p></section>`;
+    host.innerHTML = `
+      <div class="page-head">
+        <button class="linkish" data-action="sch-close">Abbrechen</button>
+        <b>Zeitplan</b>
+        <button class="linkish strong" data-action="sch-save">Speichern</button>
+      </div>
+      <div class="page-body">
+        <div class="seg">
+          <button class="${d.mode === 'week' ? 'on' : ''}" data-action="sch-mode" data-v="week">Wochentage</button>
+          <button class="${d.mode === 'cycle' ? 'on' : ''}" data-action="sch-mode" data-v="cycle">Rotation</button>
+        </div>
+        ${data.plans().length ? '' : '<div class="note">Du hast noch keine Pläne. Lege unter Fortschritt → Pläne einen an, oder nutze Cardio.</div>'}
+        ${d.mode === 'week' ? week : cycle}
+        <section class="card"><h2>Erinnerung</h2>
+          ${field('Uhrzeit', `<input id="s-time" type="time" value="${esc(d.time)}">`)}
+          <button class="ghost" data-action="sch-ics">In den Kalender übernehmen</button>
+          <p class="hint">Die App schickt selbst keine Mitteilungen. Die Kalender-Datei legt wiederkehrende Termine mit Erinnerung in deinem iPhone-Kalender an. Spätere Verschiebungen sind darin nicht enthalten.</p>
+        </section>
+        ${data.schedule() ? '<button class="ghost danger-btn" data-action="sch-delete">Zeitplan löschen</button>' : ''}
+      </div>`;
+    host.hidden = false;
+    host.querySelector('.page-body').scrollTop = keep;
+  }
+
+  // Zeitplan aus dem Entwurf: leere Tage am Ende der Rotation bleiben erhalten, sie sind Pausen
+  function draftSchedule() {
+    syncSDraft();
+    const d = state.sdraft;
+    const old = data.schedule();
+    const slots = d.mode === 'cycle' ? d.cycle : d.week;
+    const same = old && old.mode === d.mode
+      && (d.mode === 'week' || (old.anchor === d.anchor && (old.cycle || []).length === d.cycle.length));
+    return {
+      mode: d.mode, week: d.week, cycle: d.cycle, anchor: d.anchor, time: d.time,
+      shifts: same ? (old.shifts || []) : [], moves: same ? (old.moves || []) : [], skips: old ? (old.skips || {}) : {},
+      empty: !slots.some(Boolean),
+    };
+  }
+
+  const slotTitle = (slot) => (slot.kind === 'cardio' ? `Cardio: ${slotLabel(slot)} ${fmt(slot.minutes)} min` : `Training: ${slotLabel(slot)}`);
+
+  // Kalenderdatei herunterladen: Safari bietet danach „Zum Kalender hinzufügen“ an
+  function downloadIcs(sc) {
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+    const text = Schedule.ics(sc, slotTitle, todayStr(), stamp);
+    if (!text) return toast('Der Zeitplan hat noch kein Training.');
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/calendar' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'training.ics';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return undefined;
+  }
+
+  // Training zu einem Termin starten: Plan mit letzten Werten, bei Cardio mit Sportart und Dauer
+  function startSlot(slot) {
+    state.sub.progress = 'train';
+    if (slot.kind === 'cardio') {
+      openTrainEditor(null, null);
+      state.tdraft = { ...newCardioDraft(todayStr()), activity: slot.activity, minutes: String(slot.minutes || '') };
+      return renderEditor();
+    }
+    const plan = planOf(slot);
+    return plan ? openTrainEditor(null, plan) : undefined;
+  }
+
+  // Termin zu einem Schlüssel und Ausgangstag finden
+  const findSlot = (sc, date, key) => Schedule.slotsFor(sc, date, schedExists).find((s) => Schedule.keyOf(s) === key);
+
+  function scheduleAction(action, ds) {
+    const sc = data.schedule();
+    const today = todayStr();
+    switch (action) {
+      case 'sch-start': {
+        const slot = sc && findSlot(sc, ds.date, ds.key);
+        return slot ? startSlot(slot) : undefined;
+      }
+      case 'sch-skip': {
+        const slot = sc && findSlot(sc, ds.date, ds.key);
+        if (!slot) return undefined;
+        Store.set('schedule', Schedule.skip(sc, ds.date, slot));
+        return render();
+      }
+      case 'sch-move': {
+        const slot = sc && findSlot(sc, ds.date, ds.key);
+        if (!slot) return undefined;
+        const to = ds.to === 'tomorrow' ? Schedule.add(today, 1) : today;
+        const next = Schedule.move(sc, ds.from, to, slot);
+        if (!next) return toast('Da liegt schon dasselbe Training.');
+        Store.set('schedule', next);
+        render();
+        return toast(ds.to === 'tomorrow' ? 'Auf morgen verschoben.' : 'Auf heute verschoben.');
+      }
+      case 'go-coach':
+        state.tab = 'progress';
+        state.sub.progress = 'coach';
+        window.scrollTo(0, 0);
+        return render();
+      case 'sch-edit':
+        return openScheduleEditor();
+      case 'sch-close':
+        state.sdraft = null;
+        renderEditor();
+        return render();
+      case 'sch-mode':
+        syncSDraft();
+        state.sdraft.mode = ds.v;
+        return renderEditor();
+      case 'sch-add-day':
+        syncSDraft();
+        if (state.sdraft.cycle.length >= 14) return toast('Mehr als 14 Tage sind nicht vorgesehen.');
+        state.sdraft.cycle.push(null);
+        return renderEditor();
+      case 'sch-del-day':
+        syncSDraft();
+        state.sdraft.cycle.splice(Number(ds.i), 1);
+        return renderEditor();
+      case 'sch-save': {
+        const { empty, ...next } = draftSchedule();
+        if (empty) return toast('Wähle mindestens ein Training aus.');
+        if (!next.anchor) return toast('Bitte das Startdatum angeben.');
+        Store.set('schedule', next);
+        state.sdraft = null;
+        renderEditor();
+        render();
+        return toast('Zeitplan gespeichert.');
+      }
+      case 'sch-delete':
+        if (!confirm('Zeitplan löschen? Bereits erledigte Trainings bleiben erhalten.')) return undefined;
+        Store.set('schedule', null);
+        state.sdraft = null;
+        renderEditor();
+        return render();
+      case 'sch-ics': {
+        if (state.sdraft) {
+          const { empty, ...cur } = draftSchedule();
+          return empty ? toast('Wähle zuerst mindestens ein Training aus.') : downloadIcs(cur);
+        }
+        return sc ? downloadIcs(sc) : undefined;
+      }
+      default:
+        return undefined;
+    }
   }
 
   // ---------- Training-Editor (Vollbild) ----------
@@ -1398,6 +1733,7 @@
   function renderCoach() {
     const msgs = Coach.analyze(weekStats());
     return `
+      ${scheduleSection()}
       <section class="card">
         <h2>Hinweise aus den letzten 7 Tagen</h2>
         ${msgs.map((m) => `<div class="note ${m.level}">${esc(m.text)}</div>`).join('') || '<p class="muted">Keine Hinweise. Alles im Rahmen.</p>'}
@@ -1642,6 +1978,8 @@
 
   function render() {
     document.querySelectorAll('#tabs [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === state.tab));
+    // Roter Punkt am Fortschritt-Tab, solange heute ein geplantes Training offen ist
+    $('#tabs [data-tab="progress"]').classList.toggle('dot', Store.activeId() ? trainingOpenToday() : false);
     const prof = Store.profiles().find((p) => p.id === Store.activeId());
     $('#profile-badge').textContent = prof ? prof.name : '';
     if (!prof) {
@@ -1812,46 +2150,63 @@
 
   function customForm(kind, food, ean, extra = '', label = 'Speichern') {
     const f = food || {};
+    const port = f.per === 'port';
     return `<form data-form="${kind}" class="stack">
       ${ean ? `<input type="hidden" name="ean" value="${esc(ean)}">` : ''}
       ${extra}
-      ${field('Name', `<input name="name" value="${esc(f.name || '')}" required>`)}
+      ${field('Name', `<input name="name" value="${esc(f.name || '')}" placeholder="z. B. Döner oder Haferflocken" required>`)}
+      <div>
+        <div class="muted small">Die Nährwerte beziehen sich auf</div>
+        <div class="seg">
+          <button type="button" class="${port ? '' : 'on'}" data-action="food-mode" data-v="g">100 g</button>
+          <button type="button" class="${port ? 'on' : ''}" data-action="food-mode" data-v="port">1 Stück / Portion</button>
+        </div>
+        <input type="hidden" name="mode" value="${port ? 'port' : 'g'}">
+      </div>
       <div class="grid4">
         ${field('kcal', `<input name="kcal" type="number" step="any" inputmode="decimal" value="${f.kcal ?? ''}" required>`)}
         ${field('Eiweiß', `<input name="p" type="number" step="any" inputmode="decimal" value="${f.p ?? ''}" required>`)}
         ${field('Fett', `<input name="f" type="number" step="any" inputmode="decimal" value="${f.f ?? ''}" required>`)}
         ${field('KH', `<input name="c" type="number" step="any" inputmode="decimal" value="${f.c ?? ''}" required>`)}
       </div>
-      ${field('Portionsgröße in g (optional, z. B. 1 Stück)', `<input name="piece" type="number" step="any" inputmode="decimal" value="${f.piece ?? ''}">`)}
-      <p class="hint">Werte pro 100 g.</p>
+      <div class="cf-g" ${port ? 'hidden' : ''}>
+        ${field('Gewicht eines Stücks in g (optional)', `<input name="piece" type="number" step="any" inputmode="decimal" value="${f.piece ?? ''}" placeholder="z. B. 35">`)}
+        <p class="hint">Dann kannst du beim Eintragen auch Stück statt Gramm wählen.</p>
+      </div>
+      <div class="cf-port" ${port ? '' : 'hidden'}>
+        ${field('Bezeichnung (optional)', `<input name="unitName" value="${esc(f.unitName || '')}" placeholder="Döner, Pizza, Stück Kuchen">`)}
+        <p class="hint">Alle Werte gelten für genau 1 Stück. Beim Eintragen gibst du nur die Anzahl an, zum Beispiel ½ oder 2.</p>
+      </div>
       <button class="primary wide">${label}</button>
     </form>`;
   }
 
   // Nährwerte pro 100 g. Eigene und gescannte Produkte sind direkt änderbar, Standard-Einträge nur lesbar.
   function valueFields(f) {
+    const port = f.per === 'port';
+    const basis = port ? `1 ${f.unitName || 'Stück'}` : '100 g';
     if (!ownIds().has(f.id)) {
-      return `<p class="muted small">Pro 100 g: ${fmtK(f.kcal)} kcal · E ${fmt(f.p, 1)} · F ${fmt(f.f, 1)} · KH ${fmt(f.c, 1)}${f.piece ? ` · 1 Stück = ${fmt(f.piece)} g` : ''}</p>`;
+      return `<p class="muted small">Pro ${esc(basis)}: ${fmtK(f.kcal)} kcal · E ${fmt(f.p, 1)} · F ${fmt(f.f, 1)} · KH ${fmt(f.c, 1)}${f.piece ? ` · 1 Stück = ${fmt(f.piece)} g` : ''}</p>`;
     }
     const num = (name, label, val) => field(label, `<input id="v-${name}" name="${name}" type="number" step="any" min="0"
       inputmode="decimal" value="${val}" data-input="amount" required>`);
     return `<div>
-      <div class="muted small">Nährwerte pro 100 g (änderbar, wird beim Speichern übernommen)</div>
+      <div class="muted small">Nährwerte pro ${esc(basis)} (änderbar, wird beim Speichern übernommen)</div>
       <div class="grid4 values">
         ${num('kcal', 'kcal', f.kcal)}${num('p', 'Eiweiß', f.p)}${num('f', 'Fett', f.f)}${num('c', 'KH', f.c)}
       </div>
-      ${field('Gewicht pro Stück oder Portion in g (optional)', `<input id="v-piece" type="number" step="any" min="0" inputmode="decimal"
+      ${port ? '' : field('Gewicht pro Stück oder Portion in g (optional)', `<input id="v-piece" type="number" step="any" min="0" inputmode="decimal"
         value="${f.piece || ''}" placeholder="z. B. 35" data-input="amount">`)}
     </div>`;
   }
 
   // Liest die Werte aus den Feldern. Gibt null zurück, wenn es keine Felder gibt (Standard-Eintrag).
+  // Bei pauschalen Produkten gibt es kein Stückgewicht, dann fehlt der Schlüssel piece.
   function readValues() {
     if (!$('#v-kcal')) return null;
-    return {
-      kcal: n($('#v-kcal').value), p: n($('#v-p').value), f: n($('#v-f').value), c: n($('#v-c').value),
-      piece: n($('#v-piece').value) || null,
-    };
+    const v = { kcal: n($('#v-kcal').value), p: n($('#v-p').value), f: n($('#v-f').value), c: n($('#v-c').value) };
+    if ($('#v-piece')) v.piece = n($('#v-piece').value) || null;
+    return v;
   }
 
   // Speichert Felder eines eigenen oder gescannten Lebensmittels dauerhaft und gibt es aktualisiert zurück.
@@ -1865,16 +2220,22 @@
   }
 
   const valuesChanged = (food, v) => ['kcal', 'p', 'f', 'c'].some((k) => Math.abs((food[k] || 0) - v[k]) > 1e-9)
-    || (food.piece || null) !== v.piece;
+    || ('piece' in v && (food.piece || null) !== v.piece);
 
   // Standard-Einheit: Stück, wenn bekannt und gewünscht (eigene Lebensmittel merken sich die letzte Wahl)
   function defaultUnit(f) {
+    if (f.per === 'port') return 'port';
     if (!f.piece) return 'g';
     return ownIds().has(f.id) ? (f.unitPref === 'pc' ? 'pc' : 'g') : 'pc';
   }
 
-  const amountChips = (p) => (p.unit === 'pc' ? [1, 2, 3, 4, 6] : [50, 100, 150, 200])
-    .map((v) => `<button type="button" class="chip" data-action="amount-set" data-v="${v}">${v}${p.unit === 'pc' ? ' Stück' : ' g'}</button>`).join('');
+  const amountChips = (p) => {
+    if (p.unit === 'port') {
+      return [0.5, 1, 1.5, 2, 3].map((v) => `<button type="button" class="chip" data-action="amount-set" data-v="${v}">${String(v).replace('.', ',')}×</button>`).join('');
+    }
+    return (p.unit === 'pc' ? [1, 2, 3, 4, 6] : [50, 100, 150, 200])
+      .map((v) => `<button type="button" class="chip" data-action="amount-set" data-v="${v}">${v}${p.unit === 'pc' ? ' Stück' : ' g'}</button>`).join('');
+  };
 
   // Kamera zum Scannen mit Feld für die manuelle Eingabe der Nummer
   function scanBody(withBack) {
@@ -1894,7 +2255,8 @@
         p.unit = defaultUnit(f);
         p.unitFor = f.id;
       }
-      const canPieces = !!f.piece || ownIds().has(f.id);
+      const isPort = f.per === 'port';
+      const canPieces = !isPort && (!!f.piece || ownIds().has(f.id));
       const pc = p.unit === 'pc';
       return `<form data-form="amount" class="stack">
         <button type="button" class="linkish left" data-action="pk-back">‹ Zurück</button>
@@ -1903,8 +2265,8 @@
         ${f.complete === false ? '<div class="note warn">Angaben unvollständig. Bitte mit der Packung vergleichen.</div>' : ''}
         ${canPieces ? `<div class="seg"><button type="button" class="${pc ? '' : 'on'}" data-action="amount-unit" data-v="g">Gramm</button>
           <button type="button" class="${pc ? 'on' : ''}" data-action="amount-unit" data-v="pc">Stück</button></div>` : ''}
-        <label class="field"><span id="amount-label">${pc ? 'Anzahl Stück' : 'Menge in Gramm'}</span>
-          <input id="amount" name="amount" type="number" step="any" inputmode="decimal" value="${pc ? 1 : (f.piece || 100)}" data-input="amount" required></label>
+        <label class="field"><span id="amount-label">${isPort ? `Anzahl (${esc(f.unitName || 'Stück')})` : pc ? 'Anzahl Stück' : 'Menge in Gramm'}</span>
+          <input id="amount" name="amount" type="number" step="any" inputmode="decimal" value="${isPort || pc ? 1 : (f.piece || 100)}" data-input="amount" required></label>
         <div class="chips" id="amount-chips">${amountChips(p)}</div>
         <div id="amount-preview" class="line"></div>
         <button class="primary wide">Eintragen</button>
@@ -2016,7 +2378,10 @@
     const p = state.picker;
     if (!box || !p) return;
     const amount = n($('#amount').value);
-    if (p.view === 'amount') {
+    if (p.view === 'amount' && p.food.per === 'port') {
+      const t = totals({ grams: amount, unit: 'port', base: readValues() || p.food });
+      box.innerHTML = `<div class="line"><b>Nährwerte</b><b>${macroLine(t)}</b></div>`;
+    } else if (p.view === 'amount') {
       const piece = pieceWeight(p);
       const pc = p.unit === 'pc';
       const grams = pc ? amount * piece : amount;
@@ -2129,7 +2494,7 @@
 
   function plateList(d, portions) {
     return `<ul class="list">${Dish.scaled(d, portions).map((i) => `<li>
-      <div class="grow"><b>${esc(i.name)}</b></div><span>${amountText(i.amount, i.unit)}</span></li>`).join('')}</ul>`;
+      <div class="grow"><b>${esc(i.name)}</b></div><span>${amountText(i.amount, i.unit, i.unitName)}</span></li>`).join('')}</ul>`;
   }
 
   function syncDraft() {
@@ -2149,6 +2514,7 @@
     const host = $('#editor');
     if (state.tdraft) return renderTrainEditor(host);
     if (state.pdraft) return renderPlanEditor(host);
+    if (state.sdraft) return renderScheduleEditor(host);
     const d = state.draft;
     if (!d) {
       host.hidden = true;
@@ -2364,7 +2730,7 @@
   }
 
   const stripEntry = (e) => ({
-    name: e.name, grams: e.grams, ...(e.unit === 'port' ? { unit: 'port' } : {}), base: { ...e.base },
+    name: e.name, grams: e.grams, ...(e.unit === 'port' ? { unit: 'port', ...(e.unitName ? { unitName: e.unitName } : {}) } : {}), base: { ...e.base },
   });
 
   function importFile(file) {
@@ -2384,6 +2750,7 @@
         Store.set('products', d.products || []);
         Store.set('favs', d.favs || []);
         Store.set('plans', d.plans || []);
+        Store.set('schedule', d.schedule || null);
         state.tab = 'profile';
         state.sub.profile = 'data';
         toast('Import abgeschlossen.');
@@ -2408,6 +2775,7 @@
         weights: data.weights(),
         workouts: data.workouts(),
         plans: data.plans(),
+        schedule: data.schedule(),
         custom: data.custom(),
         dishes: data.dishes(),
         products: data.products(),
@@ -2471,7 +2839,8 @@
     }
   }
 
-  function handleAction(action, ds) {
+  function handleAction(action, ds, el) {
+    if (action.startsWith('sch-') || action === 'go-coach') return scheduleAction(action, ds);
     switch (action) {
       case 'sub':
         state.sub[ds.group] = ds.v;
@@ -2584,6 +2953,15 @@
       case 'amount-unit':
         state.picker.unit = ds.v;
         return applyUnit();
+      case 'food-mode': {
+        // Umschalter im Formular für eigene Lebensmittel: nur die passenden Felder zeigen
+        const form = el.closest('form');
+        form.querySelectorAll('[data-action="food-mode"]').forEach((b) => b.classList.toggle('on', b.dataset.v === ds.v));
+        form.querySelector('input[name="mode"]').value = ds.v;
+        form.querySelector('.cf-g').hidden = ds.v === 'port';
+        form.querySelector('.cf-port').hidden = ds.v !== 'port';
+        return undefined;
+      }
       case 'amount-set':
         $('#amount').value = ds.v;
         return renderAmountPreview();
@@ -2999,6 +3377,7 @@
     }
     let grams = amount;
     let pieces = null;
+    if (p.food.per === 'port') return commitItems([foodItem(p.food, amount)], more, p.food.name);
     if (p.unit === 'pc') {
       if (!p.food.piece) return toast('Bitte zuerst das Gewicht pro Stück eintragen.');
       pieces = amount;
@@ -3009,6 +3388,12 @@
       p.food = persistValues(p.food, { unitPref: p.unit }, false);
     }
     return commitItems([foodItem(p.food, grams, pieces)], more, p.food.name);
+  }
+
+  // Art der Nährwerte aus dem Formular: pro Stück/Portion (pauschal) oder pro 100 g mit optionalem Stückgewicht
+  function foodKind(get) {
+    if (get('mode') === 'port') return { per: 'port', unitName: get('unitName').trim(), piece: null };
+    return { per: null, unitName: '', piece: n(get('piece')) || null };
   }
 
   function handleSubmit(formName, form, f) {
@@ -3039,7 +3424,7 @@
         const food = {
           id: 'c' + uid(), name: get('name').trim(),
           kcal: n(get('kcal')), p: n(get('p')), f: n(get('f')), c: n(get('c')),
-          piece: n(get('piece')) || null,
+          ...foodKind(get),
           ...(ean ? { ean } : {}),
         };
         Store.set('custom', [...data.custom(), food]);
@@ -3057,7 +3442,7 @@
         const id = get('id');
         const next = {
           name: get('name').trim(), kcal: n(get('kcal')), p: n(get('p')), f: n(get('f')), c: n(get('c')),
-          piece: n(get('piece')) || null,
+          ...foodKind(get),
         };
         const upd = (list) => list.map((x) => (x.id === id ? { ...x, ...next } : x));
         Store.set('custom', upd(data.custom()));
@@ -3207,7 +3592,7 @@
       return render();
     }
     const el = e.target.closest('[data-action]');
-    if (el) handleAction(el.dataset.action, el.dataset);
+    if (el) handleAction(el.dataset.action, el.dataset, el);
     return undefined;
   });
 
@@ -3240,6 +3625,23 @@
         else m.label = el.value.trim() || m.label;
         saveMealConfig(list);
         return render();
+      }
+      case 'sch-slot':
+      case 'sch-act':
+      case 'sch-min': {
+        syncSDraft();
+        const list = el.dataset.g === 'cycle' ? state.sdraft.cycle : state.sdraft.week;
+        const i = Number(el.dataset.i);
+        if (el.dataset.change === 'sch-slot') {
+          if (!el.value) list[i] = null;
+          else if (el.value === 'cardio') list[i] = { kind: 'cardio', activity: 'run', minutes: 30 };
+          else list[i] = { kind: 'plan', planId: el.value.slice(2) };
+          return renderEditor();
+        }
+        if (!list[i]) return undefined;
+        if (el.dataset.change === 'sch-act') list[i].activity = el.value;
+        else list[i].minutes = Math.max(1, Math.round(n(el.value)) || 30);
+        return undefined;
       }
       case 'tname':
         // Übung geändert: Platzhalter mit den Werten vom letzten Mal neu laden

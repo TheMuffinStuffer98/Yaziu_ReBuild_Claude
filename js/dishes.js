@@ -17,6 +17,7 @@ const Dish = (() => {
       name: i.name,
       amount: (i.grams / n) * portions,
       unit: i.unit === 'port' ? 'port' : 'g',
+      unitName: i.unitName || '',
     }));
   }
 

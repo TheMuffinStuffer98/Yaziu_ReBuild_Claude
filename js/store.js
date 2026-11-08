@@ -4,7 +4,7 @@ const Store = (() => {
   const PREFIX = 'ft.';
   const ROOT = PREFIX + 'profiles';
   const ACTIVE = PREFIX + 'active';
-  const SECTIONS = ['settings', 'days', 'weights', 'workouts', 'custom', 'dishes', 'products', 'favs', 'plans', 'ai'];
+  const SECTIONS = ['settings', 'days', 'weights', 'workouts', 'custom', 'dishes', 'products', 'favs', 'plans', 'schedule', 'ai'];
 
   function read(key, fallback) {
     try {
