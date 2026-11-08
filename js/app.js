@@ -41,7 +41,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
-  const APP_VERSION = 'v18'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v19'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -957,7 +957,14 @@
   // Heutiges Training mit Startknopf, dazu verpasste Termine der letzten Tage. Auf der Startseite und im Coach.
   function todayCard(compact) {
     const sc = data.schedule();
-    if (!sc) return '';
+    if (!sc) {
+      // Ohne Zeitplan führt eine kleine Karte zur Einrichtung (ausblendbar)
+      if (!compact || settings().hidePlanHint) return '';
+      return `<section class="card plancard">
+        <div class="line"><h2>Trainingsplan</h2><button class="linkish" data-action="sch-hide-hint">Ausblenden</button></div>
+        <p class="muted small">Lege fest, was wann dran ist. Die App zeigt dir dann hier jeden Tag dein Training mit Startknopf.</p>
+        <button class="primary wide" data-action="sch-edit">Zeitplan einrichten</button></section>`;
+    }
     const today = todayStr();
     const wk = data.workouts();
     const info = Schedule.dayInfo(sc, today, wk, today, schedExists);
@@ -1188,6 +1195,9 @@
         render();
         return toast(ds.to === 'tomorrow' ? 'Auf morgen verschoben.' : 'Auf heute verschoben.');
       }
+      case 'sch-hide-hint':
+        Store.set('settings', { ...Store.get('settings', {}), hidePlanHint: true });
+        return render();
       case 'go-coach':
         state.tab = 'progress';
         state.sub.progress = 'coach';
