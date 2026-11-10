@@ -41,7 +41,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
-  const APP_VERSION = 'v20'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v21'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -2623,8 +2623,11 @@
       const tot = Calc.sumEntries(r.items);
       body = `<h2>${esc(r.name)}</h2>
         ${r.confidence ? `<p class="muted small">Sicherheit: ${esc(r.confidence)}${r.note ? ' · ' + esc(r.note) : ''}</p>` : ''}
-        ${r.items.length ? `<ul class="list">${r.items.map((it, i) => `<li>
-          <div class="grow"><b>${esc(it.name)}</b><small class="muted">${macroLine(Calc.entryTotals(it))} · ${it.foodId ? 'Werte aus deiner Liste' : 'Werte geschätzt'}</small></div>
+        ${r.items.length ? `<p class="hint">Zutat falsch erkannt? Ändere den Namen, dann werden die Werte neu geschätzt. Die Menge bleibt.</p>
+        <ul class="list">${r.items.map((it, i) => `<li>
+          <div class="grow">
+            <input class="ph-name" value="${esc(it.busy ? it.pending : it.name)}" data-change="ph-name" data-i="${i}" ${it.busy ? 'disabled' : ''} autocomplete="off" aria-label="Name der Zutat, änderbar">
+            <small class="muted">${it.busy ? 'Werte werden neu geschätzt …' : `${macroLine(Calc.entryTotals(it))} · ${it.foodId ? 'Werte aus deiner Liste' : 'Werte geschätzt'}`}</small></div>
           <input class="grams" type="number" step="any" inputmode="decimal" value="${it.grams}" data-change="ph-grams" data-i="${i}" aria-label="Gramm">
           <span class="unit">g</span>
           <button class="icon danger" data-action="ph-del" data-i="${i}" aria-label="Entfernen">×</button>
@@ -2698,6 +2701,37 @@
       clearInterval(ph.ticker);
     }
     ph.busy = false;
+    renderPhoto();
+  }
+
+  // Zweite Runde: Der Nutzer hat eine erkannte Zutat umbenannt (z. B. Kartoffeln zu Ananas).
+  // Steht der Name in der Lebensmittelliste, gelten deren Werte. Sonst schätzt die KI nur nach dem Namen neu, ohne Foto.
+  // Die Menge in Gramm bleibt.
+  async function renamePhotoItem(i, value) {
+    const ph = state.photo;
+    const it = ph && ph.result && ph.result.items[i];
+    const name = String(value).trim().replace(/\s+/g, ' ');
+    if (!it || !name || name === it.name) return renderPhoto();
+    const known = allFoods().find((f) => f.per !== 'port' && f.name.toLowerCase() === name.toLowerCase());
+    if (known) {
+      Object.assign(it, { name: known.name, foodId: known.id, base: { kcal: known.kcal, p: known.p, f: known.f, c: known.c } });
+      return renderPhoto();
+    }
+    it.busy = true;
+    it.pending = name;
+    renderPhoto();
+    try {
+      const ai = data.ai();
+      const res = await Vision.estimateFood(name, ai.key, ai.model);
+      if (state.photo !== ph || !ph.result || !ph.result.items.includes(it)) return;
+      Object.assign(it, { name: res.name, base: res.base });
+      delete it.foodId;
+    } catch (err) {
+      if (state.photo !== ph) return;
+      toast(err.message);
+    }
+    delete it.busy;
+    delete it.pending;
     renderPhoto();
   }
 
@@ -3079,6 +3113,7 @@
       case 'ai-test':
         return testAi();
       case 'ph-add': {
+        if (state.photo.result.items.some((it) => it.busy)) return toast('Bitte kurz warten, die Werte werden noch neu geschätzt.');
         const items = state.photo.result.items.map((it) => ({ ...it, estimated: true }));
         if (!items.length) return toast('Keine Einträge vorhanden.');
         items.forEach((it) => addEntry(state.date, state.photo.meal, it));
@@ -3682,6 +3717,8 @@
         }
         return renderEditor();
       }
+      case 'ph-name':
+        return renamePhotoItem(Number(el.dataset.i), el.value);
       case 'ph-grams': {
         const g = n(el.value);
         if (g > 0) state.photo.result.items[Number(el.dataset.i)].grams = g;

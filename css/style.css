@@ -418,6 +418,8 @@ button.mini { padding: 7px 16px; font-size: 0.9rem; border-radius: 999px; width:
 .tbtns { flex-wrap: nowrap; }
 .tbtns .ghost { margin-top: 8px; }
 .grow-input { flex: 1; }
+/* Erkannte Zutat im Foto-Ergebnis: Name ist änderbar und löst eine neue Schätzung aus */
+.ph-name { width: 100%; font-weight: 600; padding: 6px 8px; margin-bottom: 2px; min-width: 0; }
 
 /* Mahlzeiten auf der Hauptseite: eine gruppierte Fläche mit Zeilen */
 .card.group { padding: 0 16px; }

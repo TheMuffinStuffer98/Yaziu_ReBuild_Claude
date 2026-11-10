@@ -265,6 +265,14 @@ const Vision = (() => {
   async function estimate(file, key, model, mode = 'items', opts = {}) {
     const data = await toJpegBase64(file);
     const parts = [{ text: prompt(mode, opts.foods) }, { inline_data: { mime_type: 'image/jpeg', data } }];
+    const { r, use } = await runModels(parts, key, model, opts.signal);
+    const text = textOf(r.json);
+    return { ...(mode === 'dish' ? parseDish(text) : parse(text, opts.foods)), model: use };
+  }
+
+  // Schickt die Anfrage an das Standardmodell und bei Zeitüberschreitung, Überlastung, Limit oder abgeschaltetem Modell
+  // an das nächste. Gibt die erfolgreiche Antwort r und das benutzte Modell zurück.
+  async function runModels(parts, key, model, signal) {
     const first = normalizeModel(model);
     let chain = [first, ...FALLBACKS.filter((m) => m !== first)];
     let discovered = false;
@@ -274,7 +282,7 @@ const Vision = (() => {
     for (let i = 0; i < chain.length; i += 1) {
       use = chain[i];
       try {
-        r = await generate(use, parts, key, opts.signal);
+        r = await generate(use, parts, key, signal);
         lastErr = null;
       } catch (err) {
         if (err.kind === 'cancel') throw err;
@@ -286,14 +294,31 @@ const Vision = (() => {
       // Kein Standardmodell verfügbar: ein vorhandenes Modell suchen und anhängen
       if (i === chain.length - 1 && !discovered && r && r.status === 404) {
         discovered = true;
-        const found = chooseModel(await listModels(key, opts.signal));
+        const found = chooseModel(await listModels(key, signal));
         if (found && !chain.includes(found)) chain = [...chain, found];
       }
     }
     if (!r) throw lastErr;
     if (!r.ok) throw new Error(explain(r));
-    const text = textOf(r.json);
-    return { ...(mode === 'dish' ? parseDish(text) : parse(text, opts.foods)), model: use };
+    return { r, use };
+  }
+
+  // Zweite Runde: Nährwerte pro 100 g für ein Lebensmittel nur nach dem Namen schätzen, ohne Foto.
+  // Gibt {name, base: {kcal, p, f, c}, model} zurück.
+  async function estimateFood(name, key, model, opts = {}) {
+    const clean = String(name).replace(/[\r\n"]+/g, ' ').trim().slice(0, 80);
+    if (!clean) throw new Error('Bitte einen Namen eingeben.');
+    const text = [
+      `Gib die durchschnittlichen Nährwerte pro 100 g für dieses Lebensmittel an: "${clean}".`,
+      'Gemeint ist die übliche Form, wie es gegessen wird. Antworte ausschließlich mit JSON in genau dieser Form:',
+      '{"name": "Name", "kcal": 0, "protein": 0, "fat": 0, "carbs": 0}',
+      'Alle Werte gelten für 100 g. Ist es kein Lebensmittel, setze kcal auf 0.',
+    ].join('\n');
+    const { r, use } = await runModels([{ text }], key, model, opts.signal);
+    const data = jsonFrom(textOf(r.json));
+    const base = per100(data, 100);
+    if (base.kcal <= 0) throw new Error(`Für „${clean}“ konnten keine Werte geschätzt werden.`);
+    return { name: clean, base, model: use };
   }
 
   // Verbindungstest: prüft Schlüssel, findet ein Modell und misst eine kurze Antwort
@@ -309,6 +334,6 @@ const Vision = (() => {
   }
 
   return {
-    estimate, test, parse, parseDish, chooseModel, normalizeModel, thinkingFor, prompt, DEFAULT_MODEL,
+    estimate, estimateFood, test, parse, parseDish, chooseModel, normalizeModel, thinkingFor, prompt, DEFAULT_MODEL,
   };
 })();
