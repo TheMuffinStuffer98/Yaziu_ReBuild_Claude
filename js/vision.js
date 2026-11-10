@@ -23,9 +23,13 @@ const Vision = (() => {
   const knownNames = (known) => [...new Set((known || []).map((f) => String(f.name).trim()).filter(Boolean))].slice(0, MAX_KNOWN);
 
   // Modus 'items': Zutaten einzeln. Modus 'dish': ganzes Gericht (z. B. im Restaurant, Zutaten unbekannt).
-  function prompt(mode, known) {
+  function prompt(mode, known, hint = '') {
+    // Hat der Nutzer den erkannten Namen korrigiert, gilt er als feste Vorgabe
+    const clean = String(hint || '').replace(/[\r\n"„“]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const hintLine = clean ? `Hinweis des Nutzers: Das Essen auf dem Foto ist „${clean}“. Richte dich danach, auch wenn es anders aussieht.` : '';
     if (mode === 'dish') {
       return [
+        hintLine,
         'Du bist ein erfahrener Ernährungsberater. Das Foto zeigt ein fertiges Gericht, dessen Zutaten unbekannt sind,',
         'zum Beispiel aus einem Restaurant. Schätze die gesamte sichtbare Portion.',
         'Antworte ausschließlich mit JSON in genau dieser Form, ohne weiteren Text:',
@@ -34,10 +38,11 @@ const Vision = (() => {
         'Regeln: Alle Werte gelten für die gesamte Portion auf dem Foto, nicht pro 100 g.',
         'Rechne übliche Zubereitung mit ein (Öl, Butter, Saucen, Panade, Beilagen). Nutze deutsche Namen.',
         'Ist kein Essen zu sehen, setze kcal auf 0.',
-      ].join('\n');
+      ].filter(Boolean).join('\n');
     }
     const names = knownNames(known);
     return [
+      hintLine,
       'Du bist ein erfahrener Ernährungsberater. Analysiere das Foto einer Mahlzeit.',
       'Antworte ausschließlich mit JSON in genau dieser Form, ohne weiteren Text:',
       '{"name": "Name des Gerichts", "confidence": "niedrig|mittel|hoch", "note": "kurzer Hinweis",',
@@ -262,12 +267,14 @@ const Vision = (() => {
 
   // Schätzt eine Mahlzeit. opts.signal bricht ab, opts.foods sind die bekannten Lebensmittel (Werte pro 100 g).
   // Gibt das Ergebnis plus das tatsächlich genutzte Modell zurück.
+  // opts.image ist ein schon verkleinertes Bild (Base64) für eine erneute Schätzung, opts.hint der korrigierte Name.
+  // Das Ergebnis enthält das verkleinerte Bild (image), damit es nur im Arbeitsspeicher wiederverwendet werden kann.
   async function estimate(file, key, model, mode = 'items', opts = {}) {
-    const data = await toJpegBase64(file);
-    const parts = [{ text: prompt(mode, opts.foods) }, { inline_data: { mime_type: 'image/jpeg', data } }];
+    const data = opts.image || await toJpegBase64(file);
+    const parts = [{ text: prompt(mode, opts.foods, opts.hint) }, { inline_data: { mime_type: 'image/jpeg', data } }];
     const { r, use } = await runModels(parts, key, model, opts.signal);
     const text = textOf(r.json);
-    return { ...(mode === 'dish' ? parseDish(text) : parse(text, opts.foods)), model: use };
+    return { ...(mode === 'dish' ? parseDish(text) : parse(text, opts.foods)), model: use, image: data };
   }
 
   // Schickt die Anfrage an das Standardmodell und bei Zeitüberschreitung, Überlastung, Limit oder abgeschaltetem Modell
@@ -306,7 +313,7 @@ const Vision = (() => {
   // Zweite Runde: Nährwerte pro 100 g für ein Lebensmittel nur nach dem Namen schätzen, ohne Foto.
   // Gibt {name, base: {kcal, p, f, c}, model} zurück.
   async function estimateFood(name, key, model, opts = {}) {
-    const clean = String(name).replace(/[\r\n"]+/g, ' ').trim().slice(0, 80);
+    const clean = String(name).replace(/[\r\n"„“]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
     if (!clean) throw new Error('Bitte einen Namen eingeben.');
     const text = [
       `Gib die durchschnittlichen Nährwerte pro 100 g für dieses Lebensmittel an: "${clean}".`,

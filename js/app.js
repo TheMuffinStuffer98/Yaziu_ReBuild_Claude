@@ -41,7 +41,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
-  const APP_VERSION = 'v21'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v22'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -2647,7 +2647,8 @@
             ${field('Fett', `<input name="f" type="number" step="any" inputmode="decimal" value="${r.total.f}" required>`)}
             ${field('KH', `<input name="c" type="number" step="any" inputmode="decimal" value="${r.total.c}" required>`)}
           </div>
-          <p class="hint">Werte für die ganze Portion. Du kannst sie vor dem Eintragen korrigieren.</p>
+          <p class="hint">Werte für die ganze Portion. Du kannst sie vor dem Eintragen korrigieren. Wurde das Gericht falsch erkannt, ändere den Namen und lass die Werte neu schätzen.</p>
+          <button type="button" class="ghost" data-action="ph-redo">Mit diesem Namen neu schätzen</button>
           <button class="primary wide">Als 1 Portion eintragen</button>
         </form>
         <button class="ghost" data-action="ph-reset">Anderes Foto</button>`;
@@ -2671,10 +2672,13 @@
     if (state.picker && state.picker.window) renderMealWindow(state.picker);
   }
 
-  async function runPhoto(file) {
+  // Schätzt ein Foto. Mit hint (korrigierter Name) wird das schon verkleinerte Foto aus dem Arbeitsspeicher
+  // noch einmal geschickt. Schlägt das fehl, bleibt das bisherige Ergebnis stehen.
+  async function runPhoto(file, hint = '') {
     const ph = state.photo;
     if (!ph) return;
     const ai = data.ai();
+    const prev = hint ? ph.result : null;
     ph.busy = true;
     ph.error = '';
     ph.result = null;
@@ -2689,14 +2693,26 @@
       // Bekannte Lebensmittel (ohne pauschale Produkte, die keine Werte pro 100 g haben): Die KI ordnet Zutaten zu,
       // die Nährwerte kommen dann aus der Liste statt aus der Schätzung
       const foods = allFoods().filter((f) => f.per !== 'port');
-      const result = await Vision.estimate(file, ai.key, ai.model, ph.mode, { signal: ph.ctl.signal, foods });
+      const result = await Vision.estimate(file, ai.key, ai.model, ph.mode, {
+        signal: ph.ctl.signal, foods, hint, image: hint ? ph.image : null,
+      });
       if (state.photo !== ph) return;
+      ph.image = result.image; // nur im Arbeitsspeicher, für „neu schätzen“
+      delete result.image;
+      // Der vom Nutzer eingegebene Name bleibt erhalten
+      if (hint && ph.mode === 'dish') result.name = hint;
       ph.result = result;
       // Sprang ein anderes Modell ein, nur kurz melden. Das eingestellte Modell bleibt das Standardmodell.
       if (result.model && result.model !== ai.model) toast(`Das Modell ${ai.model} war nicht erreichbar, benutzt wurde ${result.model}.`);
     } catch (err) {
       if (state.photo !== ph) return;
-      ph.error = err.message === 'Abgebrochen.' ? '' : err.message;
+      const msg = err.message === 'Abgebrochen.' ? '' : err.message;
+      if (prev) {
+        ph.result = prev;
+        if (msg) toast(msg);
+      } else {
+        ph.error = msg;
+      }
     } finally {
       clearInterval(ph.ticker);
     }
@@ -3104,8 +3120,15 @@
       case 'ph-del':
         state.photo.result.items.splice(Number(ds.i), 1);
         return renderPhoto();
+      case 'ph-redo': {
+        const field = document.querySelector('[data-form="ph-dish"] [name="name"]');
+        const name = field ? field.value.trim() : '';
+        if (!name) return toast('Bitte einen Namen eingeben.');
+        if (!state.photo.image) return toast('Das Foto ist nicht mehr da. Bitte ein neues aufnehmen.');
+        return runPhoto(null, name);
+      }
       case 'ph-reset':
-        Object.assign(state.photo, { result: null, error: '' });
+        Object.assign(state.photo, { result: null, error: '', image: null });
         return renderPhoto();
       case 'ph-cancel':
         if (state.photo && state.photo.ctl) state.photo.ctl.abort();
