@@ -126,6 +126,7 @@ ist ohne laufende Kosten nicht lokal machbar. Deshalb gibt es diese Varianten:
 - [x] v18: Pauschale Produkte (Nährwerte pro Stück/Portion statt pro 100 g, eigene Bezeichnung, Anzahl beim Eintragen) und übersichtlicheres Formular mit Umschalter
 - [x] v18: Trainingszeitplan (js/schedule.js): Wochentage oder Rotation, Cardio mit Sportart und Dauer als Vorgabe, Karte auf der Startseite, roter Punkt am Fortschritt-Tab, automatisches Abhaken, Verschieben (heute/morgen) und Überspringen, Wochenübersicht und Ziele im Coach, Kalender-Export (.ics) als Erinnerung
 - [ ] Kalender-Export (.ics) auf dem iPhone testen (Nutzer prüft, ob Safari den Import anbietet)
+- [x] v20: Foto-Schätzung schneller und verlässlicher: festes Modell gemini-3.5-flash-lite mit minimalem Nachdenken (thinkingLevel), automatischer Wechsel auf gemini-3.6-flash bei Zeitüberschreitung (25 s), Überlastung oder Limit, Zutaten werden Lebensmitteln der Liste zugeordnet (Nährwerte aus der Liste, nur Unbekanntes geschätzt). Entscheidung: Kamera bleibt beim Live-Bild, die wiederholte Erlaubnis-Abfrage von iOS wird in Kauf genommen (WebKit speichert sie für Home-Bildschirm-Apps nicht). Möglicher nächster Schritt: Groq (Qwen3.8-27B Vision) als zweiter Anbieter, wenn Gemini weiter hakt
 - [ ] Foto-Schätzung mit echtem Schlüssel auf dem iPhone testen (Nutzer prüft, Verbindungstest unter Profil → Foto) (im Browser-Test war die Kamera gesperrt, es gab keinen Schlüssel)
 - [ ] Test auf dem iPhone in Safari (steht noch aus)
 - [ ] Hosting auf GitHub Pages (Repo ist angelegt, Pages-Einstellung noch offen)

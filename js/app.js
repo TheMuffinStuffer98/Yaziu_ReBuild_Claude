@@ -41,7 +41,7 @@
   ];
   const GOALS = [['cut', 'Abnehmen (Cut)'], ['maintain', 'Halten'], ['bulk', 'Muskelaufbau (Bulk)']];
   const DEFAULT_MODEL = Vision.DEFAULT_MODEL;
-  const APP_VERSION = 'v19'; // gleich wie CACHE in sw.js
+  const APP_VERSION = 'v20'; // gleich wie CACHE in sw.js
   const ACCENTS = [
     ['#1f7a5a', 'Grün'], ['#2b6fd6', 'Blau'], ['#7a4fd1', 'Violett'],
     ['#d9741a', 'Orange'], ['#cf3b4a', 'Rot'], ['#12898f', 'Türkis'],
@@ -148,7 +148,11 @@
     favs: () => Store.get('favs', []),
     plans: () => Store.get('plans', []),
     schedule: () => Store.get('schedule', null),
-    ai: () => ({ key: '', model: DEFAULT_MODEL, ...Store.get('ai', {}) }),
+    // Früher gespeicherte, langsame oder abgeschaltete Modelle werden durch das aktuelle Standardmodell ersetzt
+    ai: () => {
+      const ai = { key: '', model: DEFAULT_MODEL, ...Store.get('ai', {}) };
+      return { ...ai, model: Vision.normalizeModel(ai.model) };
+    },
   };
 
   const sumEntries = Calc.sumEntries;
@@ -2611,7 +2615,7 @@
       body = `<div class="busy">
         <div class="spinner" aria-hidden="true"></div>
         <p><b>Foto wird analysiert …</b> <span class="muted" id="ph-sec">${Math.round((Date.now() - ph.started) / 1000)} s</span></p>
-        <p class="muted small">Das kann bis zu 30 Sekunden dauern. Nach 60 Sekunden bricht die App ab.</p>
+        <p class="muted small">Meist dauert das nur wenige Sekunden. Antwortet das Modell nach 25 Sekunden nicht, versucht die App automatisch ein zweites.</p>
         <button class="ghost" data-action="ph-cancel">Abbrechen</button>
       </div>`;
     } else if (ph.result && ph.mode === 'items') {
@@ -2620,7 +2624,7 @@
       body = `<h2>${esc(r.name)}</h2>
         ${r.confidence ? `<p class="muted small">Sicherheit: ${esc(r.confidence)}${r.note ? ' · ' + esc(r.note) : ''}</p>` : ''}
         ${r.items.length ? `<ul class="list">${r.items.map((it, i) => `<li>
-          <div class="grow"><b>${esc(it.name)}</b><small class="muted">${macroLine(Calc.entryTotals(it))}</small></div>
+          <div class="grow"><b>${esc(it.name)}</b><small class="muted">${macroLine(Calc.entryTotals(it))} · ${it.foodId ? 'Werte aus deiner Liste' : 'Werte geschätzt'}</small></div>
           <input class="grams" type="number" step="any" inputmode="decimal" value="${it.grams}" data-change="ph-grams" data-i="${i}" aria-label="Gramm">
           <span class="unit">g</span>
           <button class="icon danger" data-action="ph-del" data-i="${i}" aria-label="Entfernen">×</button>
@@ -2651,7 +2655,7 @@
           <button class="${ph.mode === 'dish' ? 'on' : ''}" data-action="ph-mode" data-v="dish">Ganzes Gericht</button>
         </div>
         <p class="muted small">${ph.mode === 'items'
-    ? 'Die Schätzung nennt jede erkannte Zutat mit Menge. Du kannst die Mengen danach anpassen.'
+    ? 'Die Schätzung nennt jede erkannte Zutat mit Menge. Bekannte Zutaten übernehmen die Werte aus deiner Liste. Die Mengen kannst du danach anpassen.'
     : 'Für Gerichte mit unbekannten Zutaten, z. B. im Restaurant. Es kommt ein Wert für die ganze Portion.'}</p>
         <label class="filebtn bigbtn">Foto aufnehmen oder wählen<input type="file" accept="image/*" data-change="photo" hidden></label>
         <p class="hint">Das Foto wird verkleinert und zur Analyse an Google gesendet. Es wird nicht gespeichert. Schätzungen weichen oft um 20 bis 30 % ab.</p>`;
@@ -2679,14 +2683,14 @@
     }, 1000);
     renderPhoto();
     try {
-      const result = await Vision.estimate(file, ai.key, ai.model || DEFAULT_MODEL, ph.mode, { signal: ph.ctl.signal });
+      // Bekannte Lebensmittel (ohne pauschale Produkte, die keine Werte pro 100 g haben): Die KI ordnet Zutaten zu,
+      // die Nährwerte kommen dann aus der Liste statt aus der Schätzung
+      const foods = allFoods().filter((f) => f.per !== 'port');
+      const result = await Vision.estimate(file, ai.key, ai.model, ph.mode, { signal: ph.ctl.signal, foods });
       if (state.photo !== ph) return;
       ph.result = result;
-      // Hat die App ein anderes Modell gefunden, bleibt es gespeichert
-      if (result.model && result.model !== ai.model) {
-        Store.set('ai', { ...ai, model: result.model });
-        toast(`Modell automatisch auf ${result.model} gestellt.`);
-      }
+      // Sprang ein anderes Modell ein, nur kurz melden. Das eingestellte Modell bleibt das Standardmodell.
+      if (result.model && result.model !== ai.model) toast(`Das Modell ${ai.model} war nicht erreichbar, benutzt wurde ${result.model}.`);
     } catch (err) {
       if (state.photo !== ph) return;
       ph.error = err.message === 'Abgebrochen.' ? '' : err.message;
@@ -2706,7 +2710,7 @@
     const key = typedKey || cur.key;
     if (!key) return toast('Bitte zuerst den Schlüssel eintragen.');
     const model = (form ? form.querySelector('[name="model"]').value.trim() : '') || cur.model;
-    out.innerHTML = '<p class="muted small">Verbindung wird getestet … (bis zu 60 Sekunden)</p>';
+    out.innerHTML = '<p class="muted small">Verbindung wird getestet … (bis zu 25 Sekunden)</p>';
     try {
       const r = await Vision.test(key, model);
       Store.set('ai', { key, model: r.model });

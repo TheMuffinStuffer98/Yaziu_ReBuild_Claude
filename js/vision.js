@@ -1,34 +1,57 @@
 // Foto-Schätzung von Mahlzeiten über die Gemini-Schnittstelle von Google.
 // Optional: Es wird ein eigener, kostenloser Schlüssel des Nutzers benötigt. Er bleibt nur im Browser.
 // Das Foto wird verkleinert (ohne Standort-Daten) und nur für die Anfrage gesendet, nicht gespeichert.
-// Google schaltet Modelle regelmäßig ab. Deshalb sucht die App bei Bedarf selbst ein verfügbares Flash-Modell.
+//
+// Schnell und verlässlich: Es wird ein festes Flash-Lite-Modell mit minimalem "Nachdenken" benutzt. Antwortet ein
+// Modell nicht rechtzeitig oder ist es nicht verfügbar, versucht die App das nächste. Bei Zutaten nennt die KI nur
+// Name und Menge. Die Nährwerte kommen aus der Lebensmittelliste der App, nur Unbekanntes wird geschätzt.
 const Vision = (() => {
   const BASE = 'https://generativelanguage.googleapis.com/v1beta';
-  const DEFAULT_MODEL = 'gemini-flash-latest';
-  const TIMEOUT_MS = 60000;
+  const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+  const FALLBACKS = ['gemini-3.6-flash'];
+  // Früher gespeicherte Modelle, die langsam sind oder abgeschaltet werden: sie zählen als "automatisch"
+  const OLD_DEFAULTS = ['gemini-flash-latest', 'gemini-2.5-flash'];
+  const TIMEOUT_MS = 25000;
+  const MAX_KNOWN = 200;
+
+  const normalizeModel = (m) => {
+    const s = String(m || '').trim();
+    return !s || OLD_DEFAULTS.includes(s) ? DEFAULT_MODEL : s;
+  };
+
+  // known = Lebensmittel der App (Name, Werte pro 100 g). Nur ihre Namen gehen in die Anfrage.
+  const knownNames = (known) => [...new Set((known || []).map((f) => String(f.name).trim()).filter(Boolean))].slice(0, MAX_KNOWN);
 
   // Modus 'items': Zutaten einzeln. Modus 'dish': ganzes Gericht (z. B. im Restaurant, Zutaten unbekannt).
-  const PROMPTS = {
-    items: [
+  function prompt(mode, known) {
+    if (mode === 'dish') {
+      return [
+        'Du bist ein erfahrener Ernährungsberater. Das Foto zeigt ein fertiges Gericht, dessen Zutaten unbekannt sind,',
+        'zum Beispiel aus einem Restaurant. Schätze die gesamte sichtbare Portion.',
+        'Antworte ausschließlich mit JSON in genau dieser Form, ohne weiteren Text:',
+        '{"name": "Name des Gerichts", "confidence": "niedrig|mittel|hoch", "note": "kurzer Hinweis",',
+        ' "grams": 0, "kcal": 0, "protein": 0, "fat": 0, "carbs": 0}',
+        'Regeln: Alle Werte gelten für die gesamte Portion auf dem Foto, nicht pro 100 g.',
+        'Rechne übliche Zubereitung mit ein (Öl, Butter, Saucen, Panade, Beilagen). Nutze deutsche Namen.',
+        'Ist kein Essen zu sehen, setze kcal auf 0.',
+      ].join('\n');
+    }
+    const names = knownNames(known);
+    return [
       'Du bist ein erfahrener Ernährungsberater. Analysiere das Foto einer Mahlzeit.',
       'Antworte ausschließlich mit JSON in genau dieser Form, ohne weiteren Text:',
       '{"name": "Name des Gerichts", "confidence": "niedrig|mittel|hoch", "note": "kurzer Hinweis",',
-      ' "items": [{"name": "Zutat", "grams": 0, "kcal": 0, "protein": 0, "fat": 0, "carbs": 0}]}',
-      'Regeln: Menge und Nährwerte beziehen sich auf die sichtbare Portion, nicht auf 100 g.',
-      'Schätze die Mengen anhand von Tellergröße, Besteck und Verpackung. Nenne jede Zutat einzeln.',
-      'Nutze deutsche Namen. Ist kein Essen zu sehen, gib items als leere Liste zurück.',
-    ].join('\n'),
-    dish: [
-      'Du bist ein erfahrener Ernährungsberater. Das Foto zeigt ein fertiges Gericht, dessen Zutaten unbekannt sind,',
-      'zum Beispiel aus einem Restaurant. Schätze die gesamte sichtbare Portion.',
-      'Antworte ausschließlich mit JSON in genau dieser Form, ohne weiteren Text:',
-      '{"name": "Name des Gerichts", "confidence": "niedrig|mittel|hoch", "note": "kurzer Hinweis",',
-      ' "grams": 0, "kcal": 0, "protein": 0, "fat": 0, "carbs": 0}',
-      'Regeln: Alle Werte gelten für die gesamte Portion auf dem Foto, nicht pro 100 g.',
-      'Rechne übliche Zubereitung mit ein (Öl, Butter, Saucen, Panade, Beilagen). Nutze deutsche Namen.',
-      'Ist kein Essen zu sehen, setze kcal auf 0.',
-    ].join('\n'),
-  };
+      ' "items": [{"name": "Zutat", "match": "Name aus der Liste oder null", "grams": 0,',
+      '  "kcal": 0, "protein": 0, "fat": 0, "carbs": 0}]}',
+      'Regeln: grams ist die sichtbare Menge der Zutat in Gramm (Schätzung nach Tellergröße, Besteck, Verpackung).',
+      'Nenne jede Zutat einzeln und nutze deutsche Namen.',
+      names.length ? `Bekannte Lebensmittel: ${names.join('; ')}.` : '',
+      'Passt eine Zutat eindeutig zu einem Eintrag dieser Liste, setze match auf genau diesen Namen',
+      'und lasse kcal, protein, fat und carbs bei 0.',
+      'Sonst setze match auf null und gib kcal, protein, fat und carbs pro 100 g dieses Lebensmittels an, nicht für die Portion.',
+      'Ist kein Essen zu sehen, gib items als leere Liste zurück.',
+    ].filter(Boolean).join('\n');
+  }
 
   // Verkleinert das Bild auf max. 896 px. Das entfernt auch Metadaten wie den Standort und beschleunigt das Senden.
   function toJpegBase64(file, max = 896) {
@@ -53,6 +76,7 @@ const Vision = (() => {
     const x = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
     return Number.isFinite(x) && x > 0 ? x : 0;
   };
+  const round1 = (x) => Math.round(x * 10) / 10;
 
   function jsonFrom(text) {
     const cleaned = String(text).replace(/```json|```/gi, '').trim();
@@ -66,20 +90,32 @@ const Vision = (() => {
     }
   }
 
+  // Werte pro 100 g aus der Antwort. Sieht es nach Werten für die ganze Portion aus (mehr als 100 g Nährstoffe
+  // oder über 950 kcal pro 100 g), werden sie auf 100 g heruntergerechnet.
+  function per100(i, grams) {
+    const kcal = num(i.kcal);
+    const p = num(i.protein);
+    const f = num(i.fat);
+    const c = num(i.carbs);
+    const k = p + f + c > 105 || kcal > 950 ? 100 / grams : 1;
+    return { kcal: Math.round(kcal * k), p: round1(p * k), f: round1(f * k), c: round1(c * k) };
+  }
+
   // Liest die Antwort des Modells. Gibt {name, confidence, note, items} zurück.
-  // items haben die Form eines Tagebuch-Eintrags: {name, grams, base} mit Werten pro 100 g.
-  function parse(text) {
+  // items haben die Form eines Tagebuch-Eintrags: {name, grams, base, foodId?} mit Werten pro 100 g.
+  // Passt eine Zutat zu einem Lebensmittel aus known, kommen die Werte von dort (mit foodId).
+  function parse(text, known = []) {
     const data = jsonFrom(text);
+    const byName = new Map((known || []).map((f) => [String(f.name).trim().toLowerCase(), f]));
     const items = (Array.isArray(data.items) ? data.items : [])
       .map((i) => {
         const grams = num(i.grams);
         if (!i.name || grams <= 0) return null;
-        const per100 = (v) => Math.round(((num(v) * 100) / grams) * 10) / 10;
-        return {
-          name: String(i.name).slice(0, 80),
-          grams: Math.round(grams),
-          base: { kcal: Math.round((num(i.kcal) * 100) / grams), p: per100(i.protein), f: per100(i.fat), c: per100(i.carbs) },
-        };
+        const hit = i.match ? byName.get(String(i.match).trim().toLowerCase()) : null;
+        if (hit) {
+          return { name: hit.name, grams: Math.round(grams), foodId: hit.id, base: { kcal: hit.kcal, p: hit.p, f: hit.f, c: hit.c } };
+        }
+        return { name: String(i.name).slice(0, 80), grams: Math.round(grams), base: per100(i, grams) };
       })
       .filter(Boolean);
     return {
@@ -110,7 +146,8 @@ const Vision = (() => {
 
   // ---------- Verbindung ----------
 
-  // Ruft die Schnittstelle auf. Liefert {ok, status, message, json}. Wirft nur bei Abbruch, Zeitüberschreitung und Netzfehlern.
+  // Ruft die Schnittstelle auf. Liefert {ok, status, message, json}.
+  // Wirft nur bei Abbruch, Zeitüberschreitung und Netzfehlern (err.kind: cancel, timeout, network).
   async function call(path, key, init = {}, outerSignal = null) {
     const ctl = new AbortController();
     let reason = 'timeout';
@@ -120,6 +157,7 @@ const Vision = (() => {
       if (outerSignal.aborted) onAbort();
       else outerSignal.addEventListener('abort', onAbort);
     }
+    const fail = (kind, message) => Object.assign(new Error(message), { kind });
     try {
       const res = await fetch(BASE + path, {
         ...init,
@@ -131,11 +169,11 @@ const Vision = (() => {
       return { ok: res.ok, status: res.status, message, json };
     } catch (err) {
       if (ctl.signal.aborted) {
-        throw new Error(reason === 'cancel'
-          ? 'Abgebrochen.'
-          : 'Keine Antwort von Google nach 60 Sekunden. Bitte erneut versuchen oder unter Profil → Foto die Verbindung testen.');
+        throw reason === 'cancel'
+          ? fail('cancel', 'Abgebrochen.')
+          : fail('timeout', `Keine Antwort von Google nach ${TIMEOUT_MS / 1000} Sekunden. Bitte erneut versuchen.`);
       }
-      throw new Error('Keine Verbindung zu Google. Internet prüfen.');
+      throw fail('network', 'Keine Verbindung zu Google. Internet prüfen.');
     } finally {
       clearTimeout(timer);
       if (outerSignal) outerSignal.removeEventListener('abort', onAbort);
@@ -153,16 +191,18 @@ const Vision = (() => {
     return `Fehler ${r.status}. ${r.message}`;
   }
 
-  // Wählt aus den Modellnamen das beste Flash-Modell. Der Alias "gemini-flash-latest" hat Vorrang.
+  // Wählt aus den Modellnamen das beste schnelle Modell: erst die festen Standardmodelle, sonst das neueste stabile
+  // Flash-Modell (Flash-Lite leicht bevorzugt, Vorschau-Modelle nur, wenn nichts anderes da ist).
   function chooseModel(names) {
-    const bad = /lite|image|live|tts|audio|embed|robotics|computer|customtools|thinking|exp|vision/i;
-    const ok = names.filter((n) => /^gemini-/.test(n) && /flash/.test(n) && !bad.test(n));
-    if (ok.includes('gemini-flash-latest')) return 'gemini-flash-latest';
+    const preferred = [DEFAULT_MODEL, ...FALLBACKS].find((m) => names.includes(m));
+    if (preferred) return preferred;
+    const bad = /image|live|tts|audio|embed|robotics|computer|customtools|thinking|exp|vision/i;
+    const ok = names.filter((n) => /^gemini-\d/.test(n) && /flash/.test(n) && !bad.test(n));
     const score = (n) => {
-      const m = n.match(/gemini-(\d+(?:\.\d+)?)-flash/);
-      return (m ? parseFloat(m[1]) : 0) * 10 - (/preview/.test(n) ? 3 : 0);
+      const m = n.match(/gemini-(\d+(?:\.\d+)?)-flash(-lite)?/);
+      return (m ? parseFloat(m[1]) * 10 + (m[2] ? 2 : 0) : 0) - (/preview/.test(n) ? 30 : 0);
     };
-    return ok.sort((a, b) => score(b) - score(a))[0] || null;
+    return ok.sort((a, b) => score(b) - score(a))[0] || (names.includes('gemini-flash-latest') ? 'gemini-flash-latest' : null);
   }
 
   // Namen aller Modelle, die Inhalte erzeugen können (ohne "models/")
@@ -181,6 +221,14 @@ const Vision = (() => {
     return names;
   }
 
+  // Einstellung für wenig "Nachdenken": je nach Modellfamilie Stufe oder Budget. Unbekannte Modelle: keine.
+  function thinkingFor(model) {
+    if (/^gemini-3\.8-flash/.test(model)) return { thinkingLevel: 'low' };
+    if (/^gemini-3(\.\d+)?-flash/.test(model)) return { thinkingLevel: 'minimal' };
+    if (/^gemini-2\.5-flash(?!-lite)/.test(model)) return { thinkingBudget: 0 };
+    return null;
+  }
+
   // Erzeugt Inhalte. Zusatzoptionen (JSON-Ausgabe, wenig Nachdenken) werden bei Ablehnung weggelassen.
   async function generate(model, parts, key, signal) {
     const variants = [{ json: true, quick: true }, {}];
@@ -188,12 +236,11 @@ const Vision = (() => {
     for (const v of variants) {
       const cfg = { temperature: 0.2 };
       if (v.json) cfg.responseMimeType = 'application/json';
-      if (v.quick && /2\.5-flash/.test(model)) cfg.thinkingConfig = { thinkingBudget: 0 };
+      const thinking = v.quick ? thinkingFor(model) : null;
+      if (thinking) cfg.thinkingConfig = thinking;
       const body = JSON.stringify({ contents: [{ parts }], generationConfig: cfg });
-      const path = `/models/${encodeURIComponent(model)}:generateContent`;
-      last = await call(path, key, { method: 'POST', body }, signal);
-      if (last.status >= 500) last = await call(path, key, { method: 'POST', body }, signal); // einmal wiederholen
-      const unsupported = last.status === 400 && /mime|thinking|response/i.test(last.message);
+      last = await call(`/models/${encodeURIComponent(model)}:generateContent`, key, { method: 'POST', body }, signal);
+      const unsupported = last.status === 400 && /mime|thinking|response|level|budget/i.test(last.message);
       if (!unsupported) return last;
     }
     return last;
@@ -209,30 +256,51 @@ const Vision = (() => {
     return cand.content.parts.filter((p) => !p.thought).map((p) => p.text || '').join('');
   }
 
-  // Schätzt eine Mahlzeit. opts.signal bricht ab. Gibt das Ergebnis plus das tatsächlich genutzte Modell zurück.
+  // Soll bei diesem Ergebnis das nächste Modell versucht werden? Nicht bei falschem Schlüssel oder fehlendem Zugriff.
+  const retryable = (r) => r.status === 404 || r.status === 429 || r.status >= 500
+    || /no longer available|not found|not supported/i.test(r.message);
+
+  // Schätzt eine Mahlzeit. opts.signal bricht ab, opts.foods sind die bekannten Lebensmittel (Werte pro 100 g).
+  // Gibt das Ergebnis plus das tatsächlich genutzte Modell zurück.
   async function estimate(file, key, model, mode = 'items', opts = {}) {
     const data = await toJpegBase64(file);
-    const parts = [{ text: PROMPTS[mode] || PROMPTS.items }, { inline_data: { mime_type: 'image/jpeg', data } }];
-    let use = model || DEFAULT_MODEL;
-    let r = await generate(use, parts, key, opts.signal);
-    // Modell weg oder unbekannt: ein verfügbares suchen und noch einmal versuchen
-    if (!r.ok && (r.status === 404 || /no longer available|not found|not supported/i.test(r.message))) {
-      const found = chooseModel(await listModels(key, opts.signal));
-      if (found && found !== use) {
-        use = found;
+    const parts = [{ text: prompt(mode, opts.foods) }, { inline_data: { mime_type: 'image/jpeg', data } }];
+    const first = normalizeModel(model);
+    let chain = [first, ...FALLBACKS.filter((m) => m !== first)];
+    let discovered = false;
+    let r = null;
+    let use = first;
+    let lastErr = null;
+    for (let i = 0; i < chain.length; i += 1) {
+      use = chain[i];
+      try {
         r = await generate(use, parts, key, opts.signal);
+        lastErr = null;
+      } catch (err) {
+        if (err.kind === 'cancel') throw err;
+        lastErr = err; // Zeitüberschreitung oder Netzfehler: nächstes Modell
+        r = null;
+      }
+      if (r && r.ok) break;
+      if (r && !retryable(r)) break;
+      // Kein Standardmodell verfügbar: ein vorhandenes Modell suchen und anhängen
+      if (i === chain.length - 1 && !discovered && r && r.status === 404) {
+        discovered = true;
+        const found = chooseModel(await listModels(key, opts.signal));
+        if (found && !chain.includes(found)) chain = [...chain, found];
       }
     }
+    if (!r) throw lastErr;
     if (!r.ok) throw new Error(explain(r));
     const text = textOf(r.json);
-    return { ...(mode === 'dish' ? parseDish(text) : parse(text)), model: use };
+    return { ...(mode === 'dish' ? parseDish(text) : parse(text, opts.foods)), model: use };
   }
 
   // Verbindungstest: prüft Schlüssel, findet ein Modell und misst eine kurze Antwort
   async function test(key, model, signal) {
     const t0 = Date.now();
     const names = await listModels(key, signal);
-    const wanted = model || DEFAULT_MODEL;
+    const wanted = normalizeModel(model);
     const use = names.includes(wanted) ? wanted : chooseModel(names);
     if (!use) throw new Error('Für diesen Schlüssel wurde kein Gemini-Flash-Modell gefunden.');
     const r = await generate(use, [{ text: 'Antworte nur mit dem Wort OK.' }], key, signal);
@@ -240,5 +308,7 @@ const Vision = (() => {
     return { model: use, changed: use !== wanted, count: names.length, seconds: Math.round((Date.now() - t0) / 100) / 10 };
   }
 
-  return { estimate, test, parse, parseDish, chooseModel, DEFAULT_MODEL };
+  return {
+    estimate, test, parse, parseDish, chooseModel, normalizeModel, thinkingFor, prompt, DEFAULT_MODEL,
+  };
 })();
